@@ -1,297 +1,374 @@
 package acceptance.classification;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import acceptance.AbstractAccTest;
-import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
+import acceptance.DefaultTestEntities;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.DynamicTest;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestFactory;
+import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestTemplate;
-import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.function.ThrowingConsumer;
+import testapi.TaskanaInject;
+import testapi.TaskanaIntegrationTest;
 
 import pro.taskana.classification.api.ClassificationService;
 import pro.taskana.classification.api.exceptions.ClassificationAlreadyExistException;
 import pro.taskana.classification.api.exceptions.MalformedServiceLevelException;
 import pro.taskana.classification.api.models.Classification;
+import pro.taskana.classification.api.models.ClassificationSummary;
 import pro.taskana.classification.internal.models.ClassificationImpl;
+import pro.taskana.common.api.TaskanaEngine;
 import pro.taskana.common.api.exceptions.DomainNotFoundException;
 import pro.taskana.common.api.exceptions.InvalidArgumentException;
 import pro.taskana.common.api.exceptions.NotAuthorizedException;
-import pro.taskana.common.internal.util.IdGenerator;
-import pro.taskana.common.test.security.JaasExtension;
 import pro.taskana.common.test.security.WithAccessId;
 
 /** Acceptance test for all "create classification" scenarios. */
-@ExtendWith(JaasExtension.class)
-class CreateClassificationAccTest extends AbstractAccTest {
+@TaskanaIntegrationTest
+class CreateClassificationAccTest {
 
-  private static final ClassificationService CLASSIFICATION_SERVICE =
-      taskanaEngine.getClassificationService();
+  @TaskanaInject ClassificationService classificationService;
+  @TaskanaInject TaskanaEngine taskanaEngine;
 
   @WithAccessId(user = "businessadmin")
   @Test
-  void testCreateMasterClassification() throws Exception {
-    final long amountOfClassificationsBefore =
-        CLASSIFICATION_SERVICE.createClassificationQuery().count();
-    Classification classification = CLASSIFICATION_SERVICE.newClassification("Key0", "", "TASK");
-    classification.setIsValidInDomain(true);
-    classification.setServiceLevel("P1D");
-    classification = CLASSIFICATION_SERVICE.createClassification(classification);
+  void should_OnlyCreateOneClassification_WhenCreatingMasterClassification() throws Exception {
+    Classification classification = classificationService.newClassification("Key0", "", "TASK");
 
-    // check only 1 created
-    long amountOfClassificationsAfter = CLASSIFICATION_SERVICE.createClassificationQuery().count();
-    assertThat(amountOfClassificationsAfter).isEqualTo(amountOfClassificationsBefore + 1);
+    classification = classificationService.createClassification(classification);
 
-    classification = CLASSIFICATION_SERVICE.getClassification(classification.getId());
-    assertThat(classification).isNotNull();
-
-    assertThat(classification.getCreated()).isNotNull();
-    assertThat(classification.getModified()).isNotNull();
-    assertThat(classification.getId()).isNotNull();
-    assertThat(classification.getIsValidInDomain()).isFalse();
-    assertThat(classification.getId()).startsWith(IdGenerator.ID_PREFIX_CLASSIFICATION);
+    List<ClassificationSummary> classifications =
+        classificationService.createClassificationQuery().keyIn("Key0").list();
+    assertThat(classifications).containsExactly(classification.asSummary());
   }
 
   @WithAccessId(user = "businessadmin")
   @Test
-  void testCreateClassificationWithMasterCopy() throws Exception {
-    final long countClassificationsBefore =
-        CLASSIFICATION_SERVICE.createClassificationQuery().count();
+  void should_CreateMasterClassification_WhenCreatingClassificationWithDomain() throws Exception {
     Classification classification =
-        CLASSIFICATION_SERVICE.newClassification("Key1", "DOMAIN_A", "TASK");
-    classification.setIsValidInDomain(true);
-    classification.setServiceLevel("P1D");
-    classification = CLASSIFICATION_SERVICE.createClassification(classification);
+        classificationService.newClassification("Key1", "DOMAIN_A", "TASK");
 
-    // Check returning one is the "original"
-    Classification createdClassification =
-        CLASSIFICATION_SERVICE.getClassification(classification.getId());
-    assertThat(classification).isNotNull();
-    assertThat(classification.getCreated()).isNotNull();
-    assertThat(classification.getModified()).isNotNull();
-    assertThat(classification.getId()).isNotNull();
-    assertThat(classification.getIsValidInDomain()).isTrue();
-    assertThat(classification.getId()).startsWith(IdGenerator.ID_PREFIX_CLASSIFICATION);
-    assertThat(createdClassification.getDomain()).isEqualTo("DOMAIN_A");
-    assertThat(createdClassification.getKey()).isEqualTo("Key1");
+    classificationService.createClassification(classification);
 
-    // Check 2 new created
-    long amountOfClassificationsAfter = CLASSIFICATION_SERVICE.createClassificationQuery().count();
-    assertThat(amountOfClassificationsAfter).isEqualTo(countClassificationsBefore + 2);
+    ClassificationImpl expectedMasterClassification =
+        (ClassificationImpl) classification.copy("Key1");
+    expectedMasterClassification.setDomain("");
 
-    // Check main
-    classification = CLASSIFICATION_SERVICE.getClassification(classification.getId());
-    assertThat(classification).isNotNull();
-    assertThat(classification.getCreated()).isNotNull();
-    assertThat(classification.getModified()).isNotNull();
-    assertThat(classification.getId()).isNotNull();
-    assertThat(classification.getIsValidInDomain()).isTrue();
-    assertThat(classification.getId()).startsWith(IdGenerator.ID_PREFIX_CLASSIFICATION);
+    List<ClassificationSummary> classifications =
+        classificationService.createClassificationQuery().keyIn("Key1").list();
 
-    // Check master-copy
-    classification = CLASSIFICATION_SERVICE.getClassification(classification.getKey(), "");
-    assertThat(classification).isNotNull();
-    assertThat(classification.getCreated()).isNotNull();
-    assertThat(classification.getModified()).isNotNull();
-    assertThat(classification.getId()).isNotNull();
-    assertThat(classification.getIsValidInDomain()).isFalse();
-    assertThat(classification.getId()).startsWith(IdGenerator.ID_PREFIX_CLASSIFICATION);
+    assertThat(classifications)
+        .usingRecursiveFieldByFieldElementComparatorIgnoringFields("id")
+        .containsExactlyInAnyOrder(
+            classification.asSummary(), expectedMasterClassification.asSummary());
   }
 
   @WithAccessId(user = "businessadmin")
   @Test
-  void testCreateClassificationWithExistingMaster() throws Exception {
+  void should_CreateClassification_WhenAlreadyExistingMasterClassification() throws Exception {
 
-    Classification classification = CLASSIFICATION_SERVICE.newClassification("Key0815", "", "TASK");
-    classification.setServiceLevel("P1D");
-    CLASSIFICATION_SERVICE.createClassification(classification);
+    Classification masterClassification =
+        DefaultTestEntities.defaultTestClassification()
+            .key("Key3")
+            .domain("")
+            .type("TASK")
+            .buildAndStore(classificationService);
 
-    long amountOfClassificationsBefore = CLASSIFICATION_SERVICE.createClassificationQuery().count();
-    Classification expected =
-        CLASSIFICATION_SERVICE.newClassification("Key0815", "DOMAIN_B", "TASK");
-    expected.setServiceLevel("P1D");
-    Classification actual = CLASSIFICATION_SERVICE.createClassification(expected);
-    long amountOfClassificationsAfter = CLASSIFICATION_SERVICE.createClassificationQuery().count();
-
-    assertThat(amountOfClassificationsAfter).isEqualTo(amountOfClassificationsBefore + 1);
-    assertThat(actual).isSameAs(expected);
-    assertThat(actual.getIsValidInDomain()).isTrue();
-  }
-
-  @WithAccessId(user = "businessadmin")
-  @Test
-  void testCreateChildInDomainAndCopyInMaster() throws Exception {
-    Classification parent = CLASSIFICATION_SERVICE.newClassification("Key0816", "DOMAIN_A", "TASK");
-    parent.setServiceLevel("P1D");
-    Classification actualParent = CLASSIFICATION_SERVICE.createClassification(parent);
-    assertThat(actualParent).isNotNull();
-
-    final long amountOfClassificationsBefore =
-        CLASSIFICATION_SERVICE.createClassificationQuery().count();
-    Classification child = CLASSIFICATION_SERVICE.newClassification("Key0817", "DOMAIN_A", "TASK");
-    child.setParentId(actualParent.getId());
-    child.setParentKey(actualParent.getKey());
-    child.setServiceLevel("P1D");
-    Classification actualChild = CLASSIFICATION_SERVICE.createClassification(child);
-    long amountOfClassificationsAfter = CLASSIFICATION_SERVICE.createClassificationQuery().count();
-
-    assertThat(amountOfClassificationsAfter).isEqualTo(amountOfClassificationsBefore + 2);
-    assertThat(actualChild).isNotNull();
-  }
-
-  @WithAccessId(user = "businessadmin")
-  @Test
-  void should_ThrowException_When_TryingToCreateClassificationWithNegativeServiceLevel() {
     Classification classification =
-        CLASSIFICATION_SERVICE.newClassification("someKey234", "DOMAIN_A", "TASK");
-    classification.setServiceLevel("P-1D");
+        classificationService.newClassification("Key3", "DOMAIN_B", "TASK");
+    classificationService.createClassification(classification);
 
-    assertThatThrownBy(() -> CLASSIFICATION_SERVICE.createClassification(classification))
-        .isInstanceOf(MalformedServiceLevelException.class);
+    List<ClassificationSummary> classifications =
+        classificationService.createClassificationQuery().keyIn("Key3").list();
+    assertThat(classifications).contains(classification.asSummary());
+  }
+
+  @WithAccessId(user = "businessadmin")
+  @TestFactory
+  Stream<DynamicTest>
+      should_ThrowException_When_TryingToCreateClassificationWithInvalidServiceLevel() {
+    Iterator<String> iterator = Arrays.asList("P-1D", "abc").iterator();
+    ThrowingConsumer<String> test =
+        invalidServiceLevel -> {
+          Classification classification =
+              classificationService.newClassification("KeyErrCreation", "DOMAIN_A", "TASK");
+          classification.setServiceLevel(invalidServiceLevel);
+
+          assertThatThrownBy(() -> classificationService.createClassification(classification))
+              .isInstanceOf(MalformedServiceLevelException.class)
+              .hasMessageContaining("KeyErrCreation", invalidServiceLevel, "DOMAIN_A");
+        };
+
+    return DynamicTest.stream(iterator, c -> String.format("for '%s'", c), test);
   }
 
   @WithAccessId(user = "businessadmin")
   @Test
-  void testCreateClassificationWithInvalidValues() {
-    CLASSIFICATION_SERVICE.createClassificationQuery().count();
+  void should_ThrowException_When_TryingToCreateClassificationWithInvalidKey() {
+    Classification classificationWithNullKey =
+        classificationService.newClassification(null, "DOMAIN_A", "TASK");
 
-    // Check key NULL
+    assertThatThrownBy(() -> classificationService.createClassification(classificationWithNullKey))
+        .isInstanceOf(InvalidArgumentException.class)
+        .hasMessage("Classification must contain a key");
+  }
+
+  @WithAccessId(user = "businessadmin")
+  @Test
+  void should_ThrowException_TryingToCreateClassificationWithInvalidDomain() {
+    String invalidDomainName = "UNKNOWN_DOMAIN";
+
     Classification classification =
-        CLASSIFICATION_SERVICE.newClassification(null, "DOMAIN_A", "TASK");
-    assertThatThrownBy(() -> CLASSIFICATION_SERVICE.createClassification(classification))
-        .isInstanceOf(InvalidArgumentException.class);
+        classificationService.newClassification("KeyErrCreation", invalidDomainName, "TASK");
 
-    // Check invalid ServiceLevel
-
-    Classification classification2 =
-        CLASSIFICATION_SERVICE.newClassification("Key2", "DOMAIN_B", "TASK");
-    classification2.setServiceLevel("abc");
-    assertThatThrownBy(() -> CLASSIFICATION_SERVICE.createClassification(classification2))
-        .isInstanceOf(MalformedServiceLevelException.class);
+    assertThatThrownBy(() -> classificationService.createClassification(classification))
+        .isInstanceOf(DomainNotFoundException.class)
+        .hasMessage(
+            String.format("Domain '%s' does not exist in the configuration", invalidDomainName));
   }
 
   @WithAccessId(user = "businessadmin")
   @Test
-  void testCreateClassificationAlreadyExisting() throws Exception {
-    Classification classification = CLASSIFICATION_SERVICE.newClassification("Key3", "", "TASK");
-    classification.setServiceLevel("P1D");
-    Classification classificationCreated =
-        CLASSIFICATION_SERVICE.createClassification(classification);
-    assertThatThrownBy(() -> CLASSIFICATION_SERVICE.createClassification(classificationCreated))
-        .isInstanceOf(ClassificationAlreadyExistException.class);
-  }
+  void should_ThrowException_TryingToCreateClassificationWithInvalidType() {
+    String invalidType = "UNKNOWN_TYPE";
 
-  @WithAccessId(user = "businessadmin")
-  @Test
-  void testCreateClassificationInUnknownDomain() {
     Classification classification =
-        CLASSIFICATION_SERVICE.newClassification("Key3", "UNKNOWN_DOMAIN", "TASK");
-    assertThatThrownBy(() -> CLASSIFICATION_SERVICE.createClassification(classification))
-        .isInstanceOf(DomainNotFoundException.class);
+        classificationService.newClassification("KeyErrCreation", "DOMAIN_A", invalidType);
+
+    assertThatThrownBy(() -> classificationService.createClassification(classification))
+        .isInstanceOf(InvalidArgumentException.class)
+        .hasMessage(
+            String.format(
+                "Given classification type %s is not valid according to the configuration.",
+                invalidType));
   }
 
   @WithAccessId(user = "businessadmin")
   @Test
-  void testCreateClassificationOfUnknownType() {
+  void should_ThrowException_TryingToCreateClassificationWithInvalidCategory() {
+    String invalidCategory = "UNKNOWN_CATEGORY";
+
     Classification classification =
-        CLASSIFICATION_SERVICE.newClassification("Key3", "DOMAIN_A", "UNKNOWN_TYPE");
-    assertThatThrownBy(() -> CLASSIFICATION_SERVICE.createClassification(classification))
-        .isInstanceOf(InvalidArgumentException.class);
+        classificationService.newClassification("KeyErrCreation", "DOMAIN_A", "TASK");
+    classification.setCategory(invalidCategory);
+
+    assertThatThrownBy(() -> classificationService.createClassification(classification))
+        .isInstanceOf(InvalidArgumentException.class)
+        .hasMessage(
+            String.format(
+                "Given classification category %s with type TASK is not valid according to the"
+                    + " configuration.",
+                invalidCategory));
   }
 
   @WithAccessId(user = "businessadmin")
   @Test
-  void testCreateClassificationOfUnknownCategory() {
+  void should_ThrowException_TryingToCreateClassificationWithInvalidParentKey() {
+    String invalidParentKey = "UNKNOWN_KEY";
+
     Classification classification =
-        CLASSIFICATION_SERVICE.newClassification("Key4", "DOMAIN_A", "TASK");
-    classification.setCategory("UNKNOWN_CATEGORY");
-    assertThatThrownBy(() -> CLASSIFICATION_SERVICE.createClassification(classification))
-        .isInstanceOf(InvalidArgumentException.class);
+        classificationService.newClassification("KeyErrCreation", "", "TASK");
+    classification.setParentKey(invalidParentKey);
+
+    // Make sure that there is no (Parent) Classification with this Key.
+    List<ClassificationSummary> classifications =
+        classificationService.createClassificationQuery().keyIn(invalidParentKey).list();
+    assertThat(classifications).isEmpty();
+    assertThatThrownBy(() -> classificationService.createClassification(classification))
+        .isInstanceOf(InvalidArgumentException.class)
+        .hasMessage("Parent classification could not be found.");
   }
 
   @WithAccessId(user = "businessadmin")
   @Test
-  void testCreateClassificationWithInvalidParentId() {
-    Classification classification = CLASSIFICATION_SERVICE.newClassification("Key5", "", "TASK");
-    classification.setParentId("ID WHICH CANT BE FOUND");
-    assertThatThrownBy(() -> CLASSIFICATION_SERVICE.createClassification(classification))
-        .isInstanceOf(InvalidArgumentException.class);
+  void should_ThrowException_TryingToCreateClassificationWithInvalidParentId() {
+    String invalidParentId = "UNKNOWN_ID";
+
+    Classification classification = classificationService.newClassification("KeyErr", "", "TASK");
+    classification.setParentId(invalidParentId);
+
+    // Make sure that there is no (Parent) Classification with this Id.
+    List<ClassificationSummary> classifications =
+        classificationService.createClassificationQuery().idIn(invalidParentId).list();
+    assertThat(classifications).isEmpty();
+    assertThatThrownBy(() -> classificationService.createClassification(classification))
+        .isInstanceOf(InvalidArgumentException.class)
+        .hasMessage("Parent classification could not be found.");
   }
 
   @WithAccessId(user = "businessadmin")
   @Test
-  void testCreateClassificationWithInvalidParentKey() {
-    Classification classification = CLASSIFICATION_SERVICE.newClassification("Key5", "", "TASK");
-    classification.setParentKey("KEY WHICH CANT BE FOUND");
-    assertThatThrownBy(() -> CLASSIFICATION_SERVICE.createClassification(classification))
-        .isInstanceOf(InvalidArgumentException.class);
-  }
+  void should_ThrowException_TryingToCreateClassificationWithExplicitId() {
+    String explicitId = "EXPLICIT ID";
 
-  @WithAccessId(user = "businessadmin")
-  @Test
-  void testCreateClassificationWithExplicitId() {
     ClassificationImpl classification =
-        (ClassificationImpl) CLASSIFICATION_SERVICE.newClassification("Key0818", "", "TASK");
-    classification.setId("EXPLICIT ID");
-    assertThatThrownBy(() -> CLASSIFICATION_SERVICE.createClassification(classification))
-        .isInstanceOf(InvalidArgumentException.class);
-  }
+        (ClassificationImpl) classificationService.newClassification("KeyErrCreation", "", "TASK");
+    classification.setId(explicitId);
 
-  @WithAccessId(user = "businessadmin")
-  @Test
-  void should_BeAbleToCreateNewClassification_When_ClassificationCopy() throws Exception {
-    ClassificationImpl oldClassification =
-        (ClassificationImpl) CLASSIFICATION_SERVICE.getClassification("T2100", "DOMAIN_B");
-    Classification newClassification = oldClassification.copy("T9949");
-
-    newClassification = CLASSIFICATION_SERVICE.createClassification(newClassification);
-
-    assertThat(newClassification.getId()).isNotNull();
-    assertThat(newClassification.getId()).isNotEqualTo(oldClassification.getId());
+    assertThatThrownBy(() -> classificationService.createClassification(classification))
+        .isInstanceOf(InvalidArgumentException.class)
+        .hasMessage("ClassificationId should be null on creation");
   }
 
   @WithAccessId(user = "taskadmin")
   @WithAccessId(user = "user-1-1")
   @TestTemplate
   void should_ThrowException_When_UserRoleIsNotAdminOrBusinessAdmin() {
-    ClassificationImpl classification =
-        (ClassificationImpl) CLASSIFICATION_SERVICE.newClassification("newKey718", "", "TASK");
+    Classification classification =
+        classificationService.newClassification("KeyErrCreation", "", "TASK");
 
-    ThrowingCallable createClassificationCall =
-        () -> {
-          CLASSIFICATION_SERVICE.createClassification(classification);
+    assertThatThrownBy(() -> classificationService.createClassification(classification))
+        .isInstanceOf(NotAuthorizedException.class)
+        .hasMessage(
+            String.format(
+                "Not authorized. The current user '%s' is not member of role(s) '[BUSINESS_ADMIN,"
+                    + " ADMIN]'.",
+                taskanaEngine.getCurrentUserContext().getUserid()));
+  }
+
+  @WithAccessId(user = "businessadmin")
+  @Test
+  void should_ThrowException_WhenClassificationWithKeyAlreadyExisting() throws Exception {
+    String existingKey = "Key4";
+    DefaultTestEntities.defaultTestClassification()
+        .key(existingKey)
+        .buildAndStore(classificationService);
+
+    Classification classification =
+        classificationService.newClassification(existingKey, "DOMAIN_A", "TASK");
+
+    assertThatThrownBy(() -> classificationService.createClassification(classification))
+        .isInstanceOf(ClassificationAlreadyExistException.class)
+        .hasMessageContaining(
+            String.format(
+                "A Classification with key '%s' already exists in domain 'DOMAIN_A'.",
+                existingKey));
+  }
+
+  @WithAccessId(user = "businessadmin")
+  @Test
+  void should_CreateNewClassification_When_ClassificationCopy() throws Exception {
+    Classification classification =
+        DefaultTestEntities.defaultTestClassification()
+            .key("Key5")
+            .buildAndStore(classificationService);
+
+    Classification classificationCopy = classification.copy("Key5_copy");
+
+    assertThatCode(() -> classificationService.createClassification(classificationCopy))
+        .doesNotThrowAnyException();
+  }
+
+  @WithAccessId(user = "businessadmin")
+  @TestFactory
+  Stream<DynamicTest>
+      should_SetDefaultServiceLevel_When_TryingToCreateClassificationWithMissingServiceLevel() {
+    Iterator<String> iterator = Arrays.asList("", null).iterator();
+    AtomicInteger i = new AtomicInteger();
+
+    ThrowingConsumer<String> test =
+        serviceLevel -> {
+          Classification classification =
+              classificationService.newClassification("Key6_" + i.getAndIncrement(), "", "TASK");
+          classification.setServiceLevel(serviceLevel);
+
+          classification = classificationService.createClassification(classification);
+
+          assertThat(classification.getServiceLevel()).isEqualTo("P0D");
         };
 
-    assertThatThrownBy(createClassificationCall).isInstanceOf(NotAuthorizedException.class);
+    return DynamicTest.stream(iterator, c -> String.format("for '%s'", c), test);
   }
 
-  @WithAccessId(user = "admin")
+  @WithAccessId(user = "businessadmin")
   @Test
-  void should_SetDefaultServiceLevel_When_TryingToCreateClassificationWithMissingServiceLevel()
-      throws Exception {
-    Classification classification =
-        CLASSIFICATION_SERVICE.newClassification("newKey718", "", "TASK");
-    classification = CLASSIFICATION_SERVICE.createClassification(classification);
-    assertThat(classification.getServiceLevel()).isEqualTo("P0D");
+  void should_SetDefaultValues_When_CreatingClassificationWithoutSpecificValues() throws Exception {
+    Classification classification = classificationService.newClassification("Key7", "", "TASK");
+    classification = classificationService.createClassification(classification);
 
-    classification = CLASSIFICATION_SERVICE.newClassification("newKey71", "", "TASK");
-    classification.setServiceLevel("");
-    classification = CLASSIFICATION_SERVICE.createClassification(classification);
     assertThat(classification.getServiceLevel()).isEqualTo("P0D");
+    assertThat(classification.getId()).isNotEqualTo(null);
+    assertThat(classification.getId()).isNotEmpty();
+    assertThat(classification.getCreated()).isNotNull();
+    assertThat(classification.getModified()).isNotNull();
+    assertThat(classification.getParentId()).isEqualTo("");
+    assertThat(classification.getParentKey()).isEqualTo("");
+    assertThat(classification.getIsValidInDomain()).isEqualTo(false);
   }
 
-  @WithAccessId(user = "admin")
-  @Test
-  void should_SetDefaultServiceLevel_When_TryingToUpdateClassificationWithMissingServiceLevel()
-      throws Exception {
-    Classification classification =
-        CLASSIFICATION_SERVICE.getClassification("CLI:000000000000000000000000000000000001");
-    classification.setServiceLevel(null);
-    classification = CLASSIFICATION_SERVICE.updateClassification(classification);
-    assertThat(classification.getServiceLevel()).isEqualTo("P0D");
+  @WithAccessId(user = "businessadmin")
+  @AfterAll
+  void should_NotCreateClassification_When_ExceptionIsThrownDuringCreation() {
+    List<ClassificationSummary> classifications =
+        classificationService.createClassificationQuery().keyIn("KeyErrCreation").list();
 
-    classification.setServiceLevel("");
-    classification = CLASSIFICATION_SERVICE.updateClassification(classification);
-    assertThat(classification.getServiceLevel()).isEqualTo("P0D");
+    assertThat(classifications).isEmpty();
+  }
+
+  @Nested
+  @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+  class CreatingChildClassificationTest {
+    String parentId;
+    String parentKey;
+
+    @WithAccessId(user = "businessadmin")
+    @BeforeAll
+    void setupParentClassification() throws Exception {
+      ClassificationSummary parentClassification =
+          DefaultTestEntities.defaultTestClassification()
+              .key("Key0")
+              .domain("DOMAIN_A")
+              .type("TASK")
+              .buildAndStoreAsSummary(classificationService);
+      parentId = parentClassification.getParentId();
+      parentKey = parentClassification.getParentKey();
+    }
+
+    @WithAccessId(user = "businessadmin")
+    @Test
+    void should_CreateClassification_WhenCreatingChildClassification() throws Exception {
+      Classification childClassification =
+          classificationService.newClassification("Key0_1", "DOMAIN_A", "TASK");
+      childClassification.setParentId(parentId);
+      childClassification.setParentKey(parentKey);
+
+      assertThatCode(() -> classificationService.createClassification(childClassification))
+          .doesNotThrowAnyException();
+      List<ClassificationSummary> classifications =
+          classificationService.createClassificationQuery().parentIdIn(parentId).list();
+      assertThat(classifications).contains(childClassification.asSummary());
+    }
+
+    @WithAccessId(user = "businessadmin")
+    @Test
+    void should_CreateMasterClassification_WhenCreatingChildClassification() throws Exception {
+      Classification childClassification =
+          classificationService.newClassification("Key0_2", "DOMAIN_A", "TASK");
+      childClassification.setParentId(parentId);
+      childClassification.setParentKey(parentKey);
+      classificationService.createClassification(childClassification);
+
+      ClassificationImpl expectedMasterClassification =
+          (ClassificationImpl) childClassification.copy("Key0_2");
+      expectedMasterClassification.setDomain("");
+      expectedMasterClassification.setParentId(parentId);
+      expectedMasterClassification.setParentKey(parentKey);
+      List<ClassificationSummary> classifications =
+          classificationService.createClassificationQuery().keyIn("Key0_2").list();
+      assertThat(classifications)
+          .usingRecursiveFieldByFieldElementComparatorIgnoringFields("id")
+          .contains(expectedMasterClassification.asSummary());
+    }
   }
 }
