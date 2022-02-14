@@ -1,27 +1,8 @@
 package acceptance.classification;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
 import acceptance.DefaultTestEntities;
-import java.util.Arrays;
-import java.util.Iterator;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Stream;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.DynamicTest;
-import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestFactory;
-import org.junit.jupiter.api.TestInstance;
-import org.junit.jupiter.api.TestTemplate;
+import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.function.ThrowingConsumer;
-import testapi.TaskanaInject;
-import testapi.TaskanaIntegrationTest;
-
 import pro.taskana.classification.api.ClassificationService;
 import pro.taskana.classification.api.exceptions.ClassificationAlreadyExistException;
 import pro.taskana.classification.api.exceptions.MalformedServiceLevelException;
@@ -33,6 +14,18 @@ import pro.taskana.common.api.exceptions.DomainNotFoundException;
 import pro.taskana.common.api.exceptions.InvalidArgumentException;
 import pro.taskana.common.api.exceptions.NotAuthorizedException;
 import pro.taskana.common.test.security.WithAccessId;
+import testapi.TaskanaInject;
+import testapi.TaskanaIntegrationTest;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
+import java.util.stream.Stream;
+
+import static org.assertj.core.api.Assertions.*;
 
 /** Acceptance test for all "create classification" scenarios. */
 @TaskanaIntegrationTest
@@ -126,7 +119,7 @@ class CreateClassificationAccTest {
 
   @WithAccessId(user = "businessadmin")
   @Test
-  void should_ThrowException_TryingToCreateClassificationWithInvalidDomain() {
+  void should_ThrowException_When_TryingToCreateClassificationWithInvalidDomain() {
     String invalidDomainName = "UNKNOWN_DOMAIN";
 
     Classification classification =
@@ -198,10 +191,6 @@ class CreateClassificationAccTest {
     Classification classification = classificationService.newClassification("KeyErr", "", "TASK");
     classification.setParentId(invalidParentId);
 
-    // Make sure that there is no (Parent) Classification with this Id.
-    List<ClassificationSummary> classifications =
-        classificationService.createClassificationQuery().idIn(invalidParentId).list();
-    assertThat(classifications).isEmpty();
     assertThatThrownBy(() -> classificationService.createClassification(classification))
         .isInstanceOf(InvalidArgumentException.class)
         .hasMessage("Parent classification could not be found.");
@@ -210,11 +199,9 @@ class CreateClassificationAccTest {
   @WithAccessId(user = "businessadmin")
   @Test
   void should_ThrowException_TryingToCreateClassificationWithExplicitId() {
-    String explicitId = "EXPLICIT ID";
-
     ClassificationImpl classification =
         (ClassificationImpl) classificationService.newClassification("KeyErrCreation", "", "TASK");
-    classification.setId(explicitId);
+    classification.setId("EXPLICIT ID");
 
     assertThatThrownBy(() -> classificationService.createClassification(classification))
         .isInstanceOf(InvalidArgumentException.class)
@@ -337,7 +324,7 @@ class CreateClassificationAccTest {
 
     @WithAccessId(user = "businessadmin")
     @Test
-    void should_CreateClassification_WhenCreatingChildClassification() throws Exception {
+    void should_CreateChildClassification() throws Exception {
       Classification childClassification =
           classificationService.newClassification("Key0_1", "DOMAIN_A", "TASK");
       childClassification.setParentId(parentId);
@@ -351,24 +338,37 @@ class CreateClassificationAccTest {
     }
 
     @WithAccessId(user = "businessadmin")
-    @Test
-    void should_CreateMasterClassification_WhenCreatingChildClassification() throws Exception {
-      Classification childClassification =
-          classificationService.newClassification("Key0_2", "DOMAIN_A", "TASK");
-      childClassification.setParentId(parentId);
-      childClassification.setParentKey(parentKey);
-      classificationService.createClassification(childClassification);
+    @TestFactory
+    Stream<DynamicTest> should_CreateMasterClassification_WhenCreatingChildClassification()
+        throws Exception {
+      List<Consumer<Classification>> setterList = new ArrayList<>();
+      setterList.add(p -> p.setParentKey(parentKey));
+      setterList.add(p -> p.setParentId(parentId));
+      Iterator<Consumer<Classification>> iterator = setterList.iterator();
 
-      ClassificationImpl expectedMasterClassification =
-          (ClassificationImpl) childClassification.copy("Key0_2");
-      expectedMasterClassification.setDomain("");
-      expectedMasterClassification.setParentId(parentId);
-      expectedMasterClassification.setParentKey(parentKey);
-      List<ClassificationSummary> classifications =
-          classificationService.createClassificationQuery().keyIn("Key0_2").list();
-      assertThat(classifications)
-          .usingRecursiveFieldByFieldElementComparatorIgnoringFields("id")
-          .contains(expectedMasterClassification.asSummary());
+      AtomicInteger i = new AtomicInteger();
+
+      ThrowingConsumer<Consumer<Classification>> test =
+          consumer -> {
+            Classification childClassification =
+                classificationService.newClassification("Key0_2_" + i.get(), "DOMAIN_A", "TASK");
+            consumer.accept(childClassification);
+            classificationService.createClassification(childClassification);
+
+            ClassificationImpl expectedMasterClassification =
+                (ClassificationImpl) childClassification.copy("Key0_2_" + i.get());
+            expectedMasterClassification.setDomain("");
+            List<ClassificationSummary> classifications =
+                classificationService
+                    .createClassificationQuery()
+                    .keyIn("Key0_2_" + i.getAndIncrement())
+                    .list();
+            assertThat(classifications)
+                .usingRecursiveFieldByFieldElementComparatorIgnoringFields("id")
+                .contains(expectedMasterClassification.asSummary());
+          };
+
+      return DynamicTest.stream(iterator, c -> String.format("for '%s'", i.get()), test);
     }
   }
 }
