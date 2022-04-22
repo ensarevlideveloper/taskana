@@ -25,6 +25,20 @@ import pro.taskana.task.internal.models.TaskImpl;
 @SuppressWarnings("checkstyle:LineLength")
 public interface TaskMapper {
 
+  @Insert(
+      "INSERT INTO TASK(ID, EXTERNAL_ID, CREATED, CLAIMED, COMPLETED, MODIFIED, PLANNED, RECEIVED, DUE, NAME, CREATOR, DESCRIPTION, NOTE, PRIORITY, STATE,  CLASSIFICATION_CATEGORY, CLASSIFICATION_KEY, CLASSIFICATION_ID, WORKBASKET_ID, WORKBASKET_KEY, DOMAIN, BUSINESS_PROCESS_ID, PARENT_BUSINESS_PROCESS_ID, OWNER, POR_COMPANY, "
+          + "POR_SYSTEM, POR_INSTANCE, POR_TYPE, POR_VALUE, IS_READ, IS_TRANSFERRED, CALLBACK_INFO, CALLBACK_STATE, CUSTOM_ATTRIBUTES, CUSTOM_1, CUSTOM_2, CUSTOM_3, CUSTOM_4, CUSTOM_5, CUSTOM_6, CUSTOM_7, CUSTOM_8, "
+          + "CUSTOM_9, CUSTOM_10, CUSTOM_11,  CUSTOM_12,  CUSTOM_13,  CUSTOM_14,  CUSTOM_15,  CUSTOM_16 ) "
+          + "VALUES(#{id},#{externalId}, #{created}, #{claimed}, #{completed}, #{modified}, #{planned}, #{received}, #{due}, #{name}, #{creator}, #{description}, #{note}, #{priority}, #{state}, #{classificationSummary.category}, "
+          + "#{classificationSummary.key}, #{classificationSummary.id}, #{workbasketSummary.id}, #{workbasketSummary.key}, #{workbasketSummary.domain}, #{businessProcessId}, "
+          + "#{parentBusinessProcessId}, #{owner}, #{primaryObjRef.company}, #{primaryObjRef.system}, #{primaryObjRef.systemInstance}, #{primaryObjRef.type}, #{primaryObjRef.value}, "
+          + "#{isRead}, #{isTransferred}, #{callbackInfo,jdbcType=CLOB,javaType=java.util.Map,typeHandler=pro.taskana.common.internal.persistence.MapTypeHandler}, #{callbackState}, "
+          + "#{customAttributes,jdbcType=CLOB,javaType=java.util.Map,typeHandler=pro.taskana.common.internal.persistence.MapTypeHandler}, "
+          + "#{custom1}, #{custom2}, #{custom3}, #{custom4}, #{custom5}, #{custom6}, #{custom7}, #{custom8}, #{custom9}, #{custom10}, "
+          + "#{custom11}, #{custom12}, #{custom13}, #{custom14}, #{custom15},  #{custom16})")
+  @Options(keyProperty = "id", keyColumn = "ID")
+  void insert(TaskImpl task);
+
   @Select(
       "<script>SELECT ID, EXTERNAL_ID, CREATED, CLAIMED, COMPLETED, MODIFIED, PLANNED, RECEIVED, DUE, NAME, CREATOR, DESCRIPTION, NOTE, PRIORITY, STATE, CLASSIFICATION_CATEGORY, CLASSIFICATION_KEY, CLASSIFICATION_ID, WORKBASKET_ID, WORKBASKET_KEY, DOMAIN, BUSINESS_PROCESS_ID, PARENT_BUSINESS_PROCESS_ID, OWNER, POR_COMPANY, POR_SYSTEM, POR_INSTANCE, POR_TYPE, POR_VALUE, IS_READ, IS_TRANSFERRED, CALLBACK_INFO, CALLBACK_STATE, CUSTOM_ATTRIBUTES, "
           + "CUSTOM_1, CUSTOM_2, CUSTOM_3, CUSTOM_4, CUSTOM_5, CUSTOM_6, CUSTOM_7, CUSTOM_8, CUSTOM_9, CUSTOM_10, CUSTOM_11, CUSTOM_12, CUSTOM_13, CUSTOM_14, CUSTOM_15, CUSTOM_16 "
@@ -92,79 +106,6 @@ public interface TaskMapper {
   @Result(property = "custom16", column = "CUSTOM_16")
   TaskImpl findById(@Param("id") String id);
 
-  @Insert(
-      "INSERT INTO TASK(ID, EXTERNAL_ID, CREATED, CLAIMED, COMPLETED, MODIFIED, PLANNED, RECEIVED, DUE, NAME, CREATOR, DESCRIPTION, NOTE, PRIORITY, STATE,  CLASSIFICATION_CATEGORY, CLASSIFICATION_KEY, CLASSIFICATION_ID, WORKBASKET_ID, WORKBASKET_KEY, DOMAIN, BUSINESS_PROCESS_ID, PARENT_BUSINESS_PROCESS_ID, OWNER, POR_COMPANY, "
-          + "POR_SYSTEM, POR_INSTANCE, POR_TYPE, POR_VALUE, IS_READ, IS_TRANSFERRED, CALLBACK_INFO, CALLBACK_STATE, CUSTOM_ATTRIBUTES, CUSTOM_1, CUSTOM_2, CUSTOM_3, CUSTOM_4, CUSTOM_5, CUSTOM_6, CUSTOM_7, CUSTOM_8, "
-          + "CUSTOM_9, CUSTOM_10, CUSTOM_11,  CUSTOM_12,  CUSTOM_13,  CUSTOM_14,  CUSTOM_15,  CUSTOM_16 ) "
-          + "VALUES(#{id},#{externalId}, #{created}, #{claimed}, #{completed}, #{modified}, #{planned}, #{received}, #{due}, #{name}, #{creator}, #{description}, #{note}, #{priority}, #{state}, #{classificationSummary.category}, "
-          + "#{classificationSummary.key}, #{classificationSummary.id}, #{workbasketSummary.id}, #{workbasketSummary.key}, #{workbasketSummary.domain}, #{businessProcessId}, "
-          + "#{parentBusinessProcessId}, #{owner}, #{primaryObjRef.company}, #{primaryObjRef.system}, #{primaryObjRef.systemInstance}, #{primaryObjRef.type}, #{primaryObjRef.value}, "
-          + "#{isRead}, #{isTransferred}, #{callbackInfo,jdbcType=CLOB,javaType=java.util.Map,typeHandler=pro.taskana.common.internal.persistence.MapTypeHandler}, #{callbackState}, "
-          + "#{customAttributes,jdbcType=CLOB,javaType=java.util.Map,typeHandler=pro.taskana.common.internal.persistence.MapTypeHandler}, "
-          + "#{custom1}, #{custom2}, #{custom3}, #{custom4}, #{custom5}, #{custom6}, #{custom7}, #{custom8}, #{custom9}, #{custom10}, "
-          + "#{custom11}, #{custom12}, #{custom13}, #{custom14}, #{custom15},  #{custom16})")
-  @Options(keyProperty = "id", keyColumn = "ID")
-  void insert(TaskImpl task);
-
-  @Update(
-      "UPDATE TASK SET CLAIMED = #{claimed}, COMPLETED = #{completed}, MODIFIED = #{modified}, PLANNED = #{planned}, RECEIVED = #{received}, DUE = #{due}, NAME = #{name}, DESCRIPTION = #{description}, NOTE = #{note}, "
-          + " PRIORITY = #{priority}, STATE = #{state}, CLASSIFICATION_CATEGORY = #{classificationSummary.category}, CLASSIFICATION_KEY = #{classificationSummary.key}, CLASSIFICATION_ID = #{classificationSummary.id}, "
-          + "WORKBASKET_ID = #{workbasketSummary.id}, WORKBASKET_KEY = #{workbasketSummary.key}, DOMAIN = #{workbasketSummary.domain}, "
-          + "BUSINESS_PROCESS_ID = #{businessProcessId}, PARENT_BUSINESS_PROCESS_ID = #{parentBusinessProcessId}, OWNER = #{owner}, POR_COMPANY = #{primaryObjRef.company}, POR_SYSTEM = #{primaryObjRef.system}, "
-          + "POR_INSTANCE = #{primaryObjRef.systemInstance}, POR_TYPE = #{primaryObjRef.type}, POR_VALUE = #{primaryObjRef.value}, IS_READ = #{isRead}, IS_TRANSFERRED = #{isTransferred}, "
-          + "CALLBACK_INFO = #{callbackInfo,jdbcType=CLOB,javaType=java.util.Map,typeHandler=pro.taskana.common.internal.persistence.MapTypeHandler}, "
-          + "CUSTOM_ATTRIBUTES = #{customAttributes,jdbcType=CLOB,javaType=java.util.Map,typeHandler=pro.taskana.common.internal.persistence.MapTypeHandler}, CUSTOM_1 = #{custom1}, CUSTOM_2 = #{custom2}, "
-          + "CUSTOM_3 = #{custom3}, CUSTOM_4 = #{custom4}, CUSTOM_5 = #{custom5}, CUSTOM_6 = #{custom6}, CUSTOM_7 = #{custom7}, CUSTOM_8 = #{custom8}, "
-          + "CUSTOM_9 = #{custom9}, CUSTOM_10 = #{custom10}, CUSTOM_11 = #{custom11}, CUSTOM_12 = #{custom12}, CUSTOM_13 = #{custom13}, CUSTOM_14 = #{custom14}, CUSTOM_15 = #{custom15}, CUSTOM_16 = #{custom16} "
-          + "WHERE ID = #{id}")
-  void update(TaskImpl task);
-
-  @Delete("DELETE FROM TASK WHERE ID = #{id}")
-  void delete(String id);
-
-  @Delete(
-      "<script>DELETE FROM TASK WHERE ID IN(<foreach item='item' collection='ids' separator=',' >#{item}</foreach>)</script>")
-  void deleteMultiple(@Param("ids") List<String> ids);
-
-  @Update(
-      "<script>UPDATE TASK SET CALLBACK_STATE = #{state} WHERE EXTERNAL_ID IN(<foreach item='item' collection='externalIds' separator=',' >#{item}</foreach>)</script>")
-  void setCallbackStateMultiple(
-      @Param("externalIds") List<String> externalIds, @Param("state") CallbackState state);
-
-  @Update(
-      "<script>UPDATE TASK SET OWNER = #{owner}, MODIFIED = #{modified} "
-          + "WHERE ID IN <foreach item='taskId' index='index' separator=',' open='(' close=')' collection='taskIds'>#{taskId}</foreach> "
-          + "</script>")
-  void setOwnerOfTasks(
-      @Param("owner") String owner,
-      @Param("taskIds") List<String> taskIds,
-      @Param("modified") Instant modified);
-
-  @Update(
-      "<script>"
-          + " UPDATE TASK SET MODIFIED = #{referencetask.modified}, STATE = #{referencetask.state}, WORKBASKET_KEY = #{referencetask.workbasketSummary.key}, WORKBASKET_ID= #{referencetask.workbasketSummary.id}, "
-          + " DOMAIN = #{referencetask.domain}, OWNER = #{referencetask.owner}, IS_READ = #{referencetask.isRead}, IS_TRANSFERRED = #{referencetask.isTransferred}"
-          + " WHERE ID IN <foreach item='taskId' index='index' separator=',' open='(' close=')' collection='taskIds'>#{taskId}</foreach>"
-          + "</script>")
-  void updateTransfered(
-      @Param("taskIds") Set<String> taskIds, @Param("referencetask") TaskImpl referencetask);
-
-  @Update(
-      "<script>"
-          + " UPDATE TASK SET COMPLETED = #{referenceTask.completed}, MODIFIED = #{referenceTask.modified}, STATE = #{referenceTask.state}, OWNER = #{referenceTask.owner}"
-          + " WHERE ID IN <foreach item='taskId' index='index' separator=',' open='(' close=')' collection='taskIds'>#{taskId}</foreach>"
-          + "</script>")
-  void updateCompleted(
-      @Param("taskIds") List<String> taskIds, @Param("referenceTask") TaskSummary referenceTask);
-
-  @Update(
-      "<script>"
-          + " UPDATE TASK SET CLAIMED = #{referenceTask.claimed}, MODIFIED = #{referenceTask.modified}, STATE = #{referenceTask.state}, OWNER = #{referenceTask.owner}, IS_READ = #{referenceTask.isRead}"
-          + " WHERE ID IN <foreach item='taskId' index='index' separator=',' open='(' close=')' collection='taskIds'>#{taskId}</foreach>"
-          + "</script>")
-  void updateClaimed(
-      @Param("taskIds") List<String> taskIds, @Param("referenceTask") TaskSummary referenceTask);
-
   @Select(
       "<script>SELECT ID, EXTERNAL_ID, STATE, WORKBASKET_ID, OWNER, MODIFIED, CLASSIFICATION_ID, "
           + "PLANNED, DUE, CALLBACK_STATE FROM TASK "
@@ -186,6 +127,49 @@ public interface TaskMapper {
   @Result(property = "callbackState", column = "CALLBACK_STATE")
   List<MinimalTaskSummary> findExistingTasks(
       @Param("taskIds") Collection<String> taskIds, @Param("externalIds") List<String> externalIds);
+
+  @Select(
+      "<script>SELECT ID, PLANNED, STATE FROM TASK "
+          + "WHERE ID IN(<foreach item='item' collection='taskIds' separator=',' >#{item}</foreach>) "
+          + "AND STATE IN ( 'READY','CLAIMED') "
+          + "<if test=\"_databaseId == 'db2'\">with UR </if> "
+          + "</script>")
+  @Result(property = "left", column = "ID")
+  @Result(
+      property = "right",
+      column = "PLANNED",
+      javaType = Instant.class,
+      typeHandler = InstantTypeHandler.class)
+  List<Pair<String, Instant>> filterTaskIdsForReadyAndClaimed(
+      @Param("taskIds") List<String> taskIds);
+
+  @Select(
+      "<script> "
+          + "<choose>"
+          + "<when  test='accessIds == null'>"
+          + "SELECT NULL LIMIT 0 "
+          + "</when>"
+          + "<otherwise>"
+          + "SELECT t.ID, t.WORKBASKET_ID FROM TASK t WHERE t.ID IN(<foreach item='taskSummary' collection='taskSummaries' separator=',' >#{taskSummary.taskId}</foreach>)"
+          + "AND NOT (t.WORKBASKET_ID IN ( "
+          + "<choose>"
+          + "<when test=\"_databaseId == 'db2'\">"
+          + "SELECT WID from (SELECT WORKBASKET_ID as WID, MAX(PERM_READ) as MAX_READ FROM WORKBASKET_ACCESS_LIST AS s where "
+          + "</when>"
+          + "<otherwise>"
+          + "SELECT WID from (SELECT WORKBASKET_ID as WID, MAX(PERM_READ::int) as MAX_READ FROM WORKBASKET_ACCESS_LIST AS s where "
+          + "</otherwise>"
+          + "</choose>"
+          + "ACCESS_ID IN (<foreach item='item' collection='accessIds' separator=',' >#{item}</foreach>) "
+          + "group by WORKBASKET_ID ) AS f where max_read = 1 ))"
+          + "</otherwise>"
+          + "</choose>"
+          + "</script>")
+  @Result(property = "left", column = "ID")
+  @Result(property = "right", column = "WORKBASKET_ID")
+  List<Pair<String, String>> getTaskAndWorkbasketIdsNotAuthorizedFor(
+      @Param("taskSummaries") List<MinimalTaskSummary> taskSummaries,
+      @Param("accessIds") List<String> accessIds);
 
   @Update(
       "<script>"
@@ -244,46 +228,62 @@ public interface TaskMapper {
   void updatePriorityOfTasks(
       @Param("taskIds") List<String> taskIds, @Param("referenceTask") TaskImpl referenceTask);
 
-  @Select(
-      "<script>SELECT ID, PLANNED, STATE FROM TASK "
-          + "WHERE ID IN(<foreach item='item' collection='taskIds' separator=',' >#{item}</foreach>) "
-          + "AND STATE IN ( 'READY','CLAIMED') "
-          + "<if test=\"_databaseId == 'db2'\">with UR </if> "
-          + "</script>")
-  @Result(property = "left", column = "ID")
-  @Result(
-      property = "right",
-      column = "PLANNED",
-      javaType = Instant.class,
-      typeHandler = InstantTypeHandler.class)
-  List<Pair<String, Instant>> filterTaskIdsForReadyAndClaimed(
-      @Param("taskIds") List<String> taskIds);
+  @Update(
+      "UPDATE TASK SET CLAIMED = #{claimed}, COMPLETED = #{completed}, MODIFIED = #{modified}, PLANNED = #{planned}, RECEIVED = #{received}, DUE = #{due}, NAME = #{name}, DESCRIPTION = #{description}, NOTE = #{note}, "
+          + " PRIORITY = #{priority}, STATE = #{state}, CLASSIFICATION_CATEGORY = #{classificationSummary.category}, CLASSIFICATION_KEY = #{classificationSummary.key}, CLASSIFICATION_ID = #{classificationSummary.id}, "
+          + "WORKBASKET_ID = #{workbasketSummary.id}, WORKBASKET_KEY = #{workbasketSummary.key}, DOMAIN = #{workbasketSummary.domain}, "
+          + "BUSINESS_PROCESS_ID = #{businessProcessId}, PARENT_BUSINESS_PROCESS_ID = #{parentBusinessProcessId}, OWNER = #{owner}, POR_COMPANY = #{primaryObjRef.company}, POR_SYSTEM = #{primaryObjRef.system}, "
+          + "POR_INSTANCE = #{primaryObjRef.systemInstance}, POR_TYPE = #{primaryObjRef.type}, POR_VALUE = #{primaryObjRef.value}, IS_READ = #{isRead}, IS_TRANSFERRED = #{isTransferred}, "
+          + "CALLBACK_INFO = #{callbackInfo,jdbcType=CLOB,javaType=java.util.Map,typeHandler=pro.taskana.common.internal.persistence.MapTypeHandler}, "
+          + "CUSTOM_ATTRIBUTES = #{customAttributes,jdbcType=CLOB,javaType=java.util.Map,typeHandler=pro.taskana.common.internal.persistence.MapTypeHandler}, CUSTOM_1 = #{custom1}, CUSTOM_2 = #{custom2}, "
+          + "CUSTOM_3 = #{custom3}, CUSTOM_4 = #{custom4}, CUSTOM_5 = #{custom5}, CUSTOM_6 = #{custom6}, CUSTOM_7 = #{custom7}, CUSTOM_8 = #{custom8}, "
+          + "CUSTOM_9 = #{custom9}, CUSTOM_10 = #{custom10}, CUSTOM_11 = #{custom11}, CUSTOM_12 = #{custom12}, CUSTOM_13 = #{custom13}, CUSTOM_14 = #{custom14}, CUSTOM_15 = #{custom15}, CUSTOM_16 = #{custom16} "
+          + "WHERE ID = #{id}")
+  void update(TaskImpl task);
 
-  @Select(
-      "<script> "
-          + "<choose>"
-          + "<when  test='accessIds == null'>"
-          + "SELECT NULL LIMIT 0 "
-          + "</when>"
-          + "<otherwise>"
-          + "SELECT t.ID, t.WORKBASKET_ID FROM TASK t WHERE t.ID IN(<foreach item='taskSummary' collection='taskSummaries' separator=',' >#{taskSummary.taskId}</foreach>)"
-          + "AND NOT (t.WORKBASKET_ID IN ( "
-          + "<choose>"
-          + "<when test=\"_databaseId == 'db2'\">"
-          + "SELECT WID from (SELECT WORKBASKET_ID as WID, MAX(PERM_READ) as MAX_READ FROM WORKBASKET_ACCESS_LIST AS s where "
-          + "</when>"
-          + "<otherwise>"
-          + "SELECT WID from (SELECT WORKBASKET_ID as WID, MAX(PERM_READ::int) as MAX_READ FROM WORKBASKET_ACCESS_LIST AS s where "
-          + "</otherwise>"
-          + "</choose>"
-          + "ACCESS_ID IN (<foreach item='item' collection='accessIds' separator=',' >#{item}</foreach>) "
-          + "group by WORKBASKET_ID ) AS f where max_read = 1 ))"
-          + "</otherwise>"
-          + "</choose>"
+  @Update(
+      "<script>UPDATE TASK SET CALLBACK_STATE = #{state} WHERE EXTERNAL_ID IN(<foreach item='item' collection='externalIds' separator=',' >#{item}</foreach>)</script>")
+  void setCallbackStateMultiple(
+      @Param("externalIds") List<String> externalIds, @Param("state") CallbackState state);
+
+  @Update(
+      "<script>UPDATE TASK SET OWNER = #{owner}, MODIFIED = #{modified} "
+          + "WHERE ID IN <foreach item='taskId' index='index' separator=',' open='(' close=')' collection='taskIds'>#{taskId}</foreach> "
           + "</script>")
-  @Result(property = "left", column = "ID")
-  @Result(property = "right", column = "WORKBASKET_ID")
-  List<Pair<String, String>> getTaskAndWorkbasketIdsNotAuthorizedFor(
-      @Param("taskSummaries") List<MinimalTaskSummary> taskSummaries,
-      @Param("accessIds") List<String> accessIds);
+  void setOwnerOfTasks(
+      @Param("owner") String owner,
+      @Param("taskIds") List<String> taskIds,
+      @Param("modified") Instant modified);
+
+  @Update(
+      "<script>"
+          + " UPDATE TASK SET MODIFIED = #{referencetask.modified}, STATE = #{referencetask.state}, WORKBASKET_KEY = #{referencetask.workbasketSummary.key}, WORKBASKET_ID= #{referencetask.workbasketSummary.id}, "
+          + " DOMAIN = #{referencetask.domain}, OWNER = #{referencetask.owner}, IS_READ = #{referencetask.isRead}, IS_TRANSFERRED = #{referencetask.isTransferred}"
+          + " WHERE ID IN <foreach item='taskId' index='index' separator=',' open='(' close=')' collection='taskIds'>#{taskId}</foreach>"
+          + "</script>")
+  void updateTransfered(
+      @Param("taskIds") Set<String> taskIds, @Param("referencetask") TaskImpl referencetask);
+
+  @Update(
+      "<script>"
+          + " UPDATE TASK SET COMPLETED = #{referenceTask.completed}, MODIFIED = #{referenceTask.modified}, STATE = #{referenceTask.state}, OWNER = #{referenceTask.owner}"
+          + " WHERE ID IN <foreach item='taskId' index='index' separator=',' open='(' close=')' collection='taskIds'>#{taskId}</foreach>"
+          + "</script>")
+  void updateCompleted(
+      @Param("taskIds") List<String> taskIds, @Param("referenceTask") TaskSummary referenceTask);
+
+  @Update(
+      "<script>"
+          + " UPDATE TASK SET CLAIMED = #{referenceTask.claimed}, MODIFIED = #{referenceTask.modified}, STATE = #{referenceTask.state}, OWNER = #{referenceTask.owner}, IS_READ = #{referenceTask.isRead}"
+          + " WHERE ID IN <foreach item='taskId' index='index' separator=',' open='(' close=')' collection='taskIds'>#{taskId}</foreach>"
+          + "</script>")
+  void updateClaimed(
+      @Param("taskIds") List<String> taskIds, @Param("referenceTask") TaskSummary referenceTask);
+
+  @Delete("DELETE FROM TASK WHERE ID = #{id}")
+  void delete(String id);
+
+  @Delete(
+      "<script>DELETE FROM TASK WHERE ID IN(<foreach item='item' collection='ids' separator=',' >#{item}</foreach>)</script>")
+  void deleteMultiple(@Param("ids") List<String> ids);
 }

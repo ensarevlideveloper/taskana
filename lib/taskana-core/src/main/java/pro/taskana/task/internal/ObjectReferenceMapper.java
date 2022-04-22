@@ -15,6 +15,11 @@ import pro.taskana.task.api.models.ObjectReference;
 @SuppressWarnings({"checkstyle:LineLength", "checkstyle:Indentation"})
 public interface ObjectReferenceMapper {
 
+  @Insert(
+      "INSERT INTO OBJECT_REFERENCE (ID,  COMPANY, SYSTEM, SYSTEM_INSTANCE, TYPE, VALUE) "
+          + "VALUES (#{ref.id}, #{ref.company}, #{ref.system}, #{ref.systemInstance}, #{ref.type}, #{ref.value})")
+  void insert(@Param("ref") ObjectReference ref);
+
   @Select(
       "<script>SELECT ID, COMPANY, SYSTEM, SYSTEM_INSTANCE, TYPE, VALUE "
           + "FROM OBJECT_REFERENCE "
@@ -65,11 +70,6 @@ public interface ObjectReferenceMapper {
       type = ObjectReferenceQuerySqlProvider.class,
       method = "queryObjectReferenceColumnValues")
   List<String> queryObjectReferenceColumnValues(ObjectReferenceQueryImpl objectReference);
-
-  @Insert(
-      "INSERT INTO OBJECT_REFERENCE (ID,  COMPANY, SYSTEM, SYSTEM_INSTANCE, TYPE, VALUE) "
-          + "VALUES (#{ref.id}, #{ref.company}, #{ref.system}, #{ref.systemInstance}, #{ref.type}, #{ref.value})")
-  void insert(@Param("ref") ObjectReference ref);
 
   @Update(
       value =

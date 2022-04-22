@@ -74,6 +74,24 @@ class ServiceLevelHandler {
     }
   }
 
+  DurationPrioHolder determineTaskPrioDuration(TaskImpl newTaskImpl, boolean onlyPriority) {
+    Set<ClassificationSummary> classificationsInvolved =
+        getClassificationsReferencedByATask(newTaskImpl);
+
+    List<ClassificationWithServiceLevelResolved> resolvedClassifications = new ArrayList<>();
+    if (onlyPriority) {
+      for (ClassificationSummary c : classificationsInvolved) {
+        resolvedClassifications.add(
+            new ClassificationWithServiceLevelResolved(c.getId(), MAX_DURATION, 0));
+      }
+    } else {
+      resolvedClassifications =
+          resolveDurationsInClassifications(new ArrayList<>(classificationsInvolved));
+    }
+
+    return getFinalPrioDurationOfTask(resolvedClassifications, onlyPriority);
+  }
+
   // Algorithm:
   // - load all relevant tasks and their attachmentSummaries
   // - load all classifications referenced by these tasks / attachments
@@ -139,22 +157,311 @@ class ServiceLevelHandler {
     }
   }
 
-  DurationPrioHolder determineTaskPrioDuration(TaskImpl newTaskImpl, boolean onlyPriority) {
-    Set<ClassificationSummary> classificationsInvolved =
-        getClassificationsReferencedByATask(newTaskImpl);
+  private Map<Integer, List<String>> getPriorityToTasksIdsMap(
+      List<MinimalTaskSummary> existingTasks,
+      List<AttachmentSummaryImpl> attachments,
+      List<ClassificationSummary> allInvolvedClassifications) {
 
-    List<ClassificationWithServiceLevelResolved> resolvedClassifications = new ArrayList<>();
-    if (onlyPriority) {
-      for (ClassificationSummary c : classificationsInvolved) {
-        resolvedClassifications.add(
-            new ClassificationWithServiceLevelResolved(c.getId(), MAX_DURATION, 0));
-      }
-    } else {
-      resolvedClassifications =
-          resolveDurationsInClassifications(new ArrayList<>(classificationsInvolved));
+    Map<String, Integer> classificationIdToPriorityMap =
+        allInvolvedClassifications.stream()
+            .collect(
+                Collectors.toMap(ClassificationSummary::getId, ClassificationSummary::getPriority));
+
+    Map<String, Set<String>> taskIdToClassificationIdsMap =
+        getTaskIdToClassificationsMap(existingTasks, attachments);
+    List<TaskIdPriority> taskIdPriorities =
+        existingTasks.stream()
+            .map(
+                t ->
+                    new TaskIdPriority(
+                        t.getTaskId(),
+                        determinePriorityForATask(
+                            t, classificationIdToPriorityMap, taskIdToClassificationIdsMap)))
+            .collect(Collectors.toList());
+    return taskIdPriorities.stream()
+        .collect(
+            groupingBy(
+                TaskIdPriority::getPriority,
+                Collectors.mapping(TaskIdPriority::getTaskId, Collectors.toList())));
+  }
+
+  private Instant getPrecedingWorkingDays(Instant instant, Duration days) {
+    return converter.subtractWorkingDaysFromInstant(instant, days);
+  }
+
+  private Instant getFollowingWorkingDays(Instant instant, Duration days) {
+    return converter.addWorkingDaysToInstant(instant, days);
+  }
+
+  private Map<Duration, List<String>> getDurationToTaskIdsMap(
+      List<MinimalTaskSummary> minimalTaskSummariesAuthorizedFor,
+      List<AttachmentSummaryImpl> attachments,
+      List<ClassificationWithServiceLevelResolved>
+          allInvolvedClassificationsWithServiceLevelResolved) {
+
+    List<TaskDuration> resultingTaskDurations = new ArrayList<>();
+    // Map taskId -> Set Of involved classification Ids
+    Map<String, Set<String>> taskIdToClassificationIdsMap =
+        getTaskIdToClassificationsMap(minimalTaskSummariesAuthorizedFor, attachments);
+    // Map classificationId -> Duration
+    Map<String, Duration> classificationIdToDurationMap =
+        allInvolvedClassificationsWithServiceLevelResolved.stream()
+            .collect(
+                Collectors.toMap(
+                    ClassificationWithServiceLevelResolved::getClassificationId,
+                    ClassificationWithServiceLevelResolved::getDurationFromClassification));
+    for (MinimalTaskSummary task : minimalTaskSummariesAuthorizedFor) {
+      Duration duration =
+          determineMinimalDurationForATask(
+              taskIdToClassificationIdsMap.get(task.getTaskId()), classificationIdToDurationMap);
+      TaskDuration taskDuration = new TaskDuration(task.getTaskId(), duration, task.getPlanned());
+      resultingTaskDurations.add(taskDuration);
     }
+    return resultingTaskDurations.stream()
+        .collect(
+            groupingBy(
+                TaskDuration::getDuration,
+                Collectors.mapping(TaskDuration::getTaskId, Collectors.toList())));
+  }
 
-    return getFinalPrioDurationOfTask(resolvedClassifications, onlyPriority);
+  private Map<InstantDurationHolder, List<TaskDuration>> getTasksPerPlannedAndDuration(
+      List<MinimalTaskSummary> minimalTaskSummaries,
+      List<AttachmentSummaryImpl> attachments,
+      List<ClassificationWithServiceLevelResolved>
+          allInvolvedClassificationsWithServiceLevelResolved) {
+
+    Map<String, Duration> durationPerClassificationId =
+        getClassificationIdToDurationMap(allInvolvedClassificationsWithServiceLevelResolved);
+
+    List<TaskDuration> resultingTaskDurations = new ArrayList<>();
+    // Map taskId -> Set Of involved classification Ids
+    Map<String, Set<String>> taskIdClassificationIdsMap =
+        getTaskIdToClassificationsMap(minimalTaskSummaries, attachments);
+
+    for (MinimalTaskSummary task : minimalTaskSummaries) {
+      Duration duration =
+          determineMinimalDurationForATask(
+              taskIdClassificationIdsMap.get(task.getTaskId()), durationPerClassificationId);
+
+      TaskDuration taskDuration = new TaskDuration(task.getTaskId(), duration, task.getPlanned());
+      resultingTaskDurations.add(taskDuration);
+    }
+    return resultingTaskDurations.stream().collect(groupingBy(TaskDuration::getPlannedDuration));
+  }
+
+  private Map<String, Duration> getClassificationIdToDurationMap(
+      List<ClassificationWithServiceLevelResolved>
+          allInvolvedClassificationsWithServiceLevelResolved) {
+    // Map classificationId -> Duration
+    return allInvolvedClassificationsWithServiceLevelResolved.stream()
+        .collect(
+            Collectors.toMap(
+                ClassificationWithServiceLevelResolved::getClassificationId,
+                ClassificationWithServiceLevelResolved::getDurationFromClassification));
+  }
+
+  // returns a map <taskId -> Set of ClassificationIds>
+  private Map<String, Set<String>> getTaskIdToClassificationsMap(
+      List<MinimalTaskSummary> minimalTaskSummaries, List<AttachmentSummaryImpl> attachments) {
+    Map<String, Set<String>> resultingTaskIdToClassificationIdsMap = new HashMap<>();
+    for (MinimalTaskSummary task : minimalTaskSummaries) {
+      Set<String> classificationIds =
+          attachments.stream()
+              .filter(a -> task.getTaskId().equals(a.getTaskId()))
+              .map(AttachmentSummaryImpl::getClassificationSummary)
+              .map(ClassificationSummary::getId)
+              .collect(Collectors.toSet());
+      classificationIds.add(task.getClassificationId());
+      resultingTaskIdToClassificationIdsMap.put(task.getTaskId(), classificationIds);
+    }
+    return resultingTaskIdToClassificationIdsMap;
+  }
+
+  private List<AttachmentSummaryImpl> getAttachmentSummaries(
+      List<MinimalTaskSummary> existingTasksAuthorizedFor) {
+    List<String> existingTaskIdsAuthorizedFor =
+        existingTasksAuthorizedFor.stream()
+            .map(MinimalTaskSummary::getTaskId)
+            .collect(Collectors.toList());
+
+    return existingTaskIdsAuthorizedFor.isEmpty()
+        ? new ArrayList<>()
+        : attachmentMapper.findAttachmentSummariesByTaskIds(existingTaskIdsAuthorizedFor);
+  }
+
+  private DurationPrioHolder getFinalPrioDurationOfTask(
+      List<ClassificationWithServiceLevelResolved> cl, boolean onlyPriority) {
+    Duration duration = MAX_DURATION;
+    int priority = Integer.MIN_VALUE;
+    for (ClassificationWithServiceLevelResolved classification : cl) {
+      Duration actualDuration = classification.getDurationFromClassification();
+      if (!onlyPriority && duration.compareTo(actualDuration) > 0) {
+        duration = actualDuration;
+      }
+      if (classification.getPriority() > priority) {
+        priority = classification.getPriority();
+      }
+    }
+    return new DurationPrioHolder(duration, priority);
+  }
+
+  private Set<ClassificationSummary> getClassificationsReferencedByATask(TaskImpl taskImpl) {
+    Set<ClassificationSummary> classifications =
+        taskImpl.getAttachments() == null
+            ? new HashSet<>()
+            : taskImpl.getAttachments().stream()
+                .map(Attachment::getClassificationSummary)
+                .collect(Collectors.toSet());
+    classifications.add(taskImpl.getClassificationSummary());
+    return classifications;
+  }
+
+  private List<ClassificationSummary> findAllClassificationsReferencedByTasksAndAttachments(
+      List<MinimalTaskSummary> existingTasksAuthorizedFor,
+      List<AttachmentSummaryImpl> attachments) {
+    Set<String> classificationIds =
+        attachments.stream()
+            .map(AttachmentSummaryImpl::getClassificationSummary)
+            .map(ClassificationSummary::getId)
+            .collect(Collectors.toSet());
+    Set<String> classificationIdsFromTasks =
+        existingTasksAuthorizedFor.stream()
+            .map(MinimalTaskSummary::getClassificationId)
+            .collect(Collectors.toSet());
+    classificationIds.addAll(classificationIdsFromTasks);
+    if (classificationIds.isEmpty()) {
+      return new ArrayList<>();
+    } else {
+      String[] idsArrayForQuery = new String[classificationIds.size()];
+      idsArrayForQuery = classificationIds.toArray(idsArrayForQuery);
+      return taskanaEngine
+          .getEngine()
+          .getClassificationService()
+          .createClassificationQuery()
+          .idIn(idsArrayForQuery)
+          .list();
+    }
+  }
+
+  private boolean dueIsUnchangedOrNull(Task newTask, Task oldTask) {
+    return newTask.getDue() == null || oldTask.getDue().equals(newTask.getDue());
+  }
+
+  private boolean plannedHasChanged(Task newTask, Task oldTask) {
+    return newTask.getPlanned() != null && !oldTask.getPlanned().equals(newTask.getPlanned());
+  }
+
+  private boolean isPriorityAndDurationAlreadyCorrect(TaskImpl newTaskImpl, TaskImpl oldTaskImpl) {
+    if (oldTaskImpl != null) {
+      final boolean isClassificationKeyChanged =
+          newTaskImpl.getClassificationKey() != null
+              && (oldTaskImpl.getClassificationKey() == null
+                  || !newTaskImpl
+                      .getClassificationKey()
+                      .equals(oldTaskImpl.getClassificationKey()));
+
+      final boolean isClassificationIdChanged =
+          newTaskImpl.getClassificationId() != null
+              && (oldTaskImpl.getClassificationId() == null
+                  || !newTaskImpl.getClassificationId().equals(oldTaskImpl.getClassificationId()));
+
+      return oldTaskImpl.getPlanned().equals(newTaskImpl.getPlanned())
+          && oldTaskImpl.getDue().equals(newTaskImpl.getDue())
+          && !isClassificationKeyChanged
+          && !isClassificationIdChanged
+          && areAttachmentsUnchanged(newTaskImpl, oldTaskImpl);
+    } else {
+      return false;
+    }
+  }
+
+  private boolean areAttachmentsUnchanged(TaskImpl newTaskImpl, TaskImpl oldTaskImpl) {
+    List<String> oldAttachmentIds =
+        oldTaskImpl.getAttachments().stream()
+            .map(AttachmentSummary::getId)
+            .collect(Collectors.toList());
+    List<String> newAttachmentIds =
+        newTaskImpl.getAttachments().stream()
+            .map(AttachmentSummary::getId)
+            .collect(Collectors.toList());
+    Set<String> oldClassificationIds =
+        oldTaskImpl.getAttachments().stream()
+            .map(Attachment::getClassificationSummary)
+            .map(ClassificationSummary::getId)
+            .collect(Collectors.toSet());
+    Set<String> newClassificationIds =
+        newTaskImpl.getAttachments().stream()
+            .map(Attachment::getClassificationSummary)
+            .map(ClassificationSummary::getId)
+            .collect(Collectors.toSet());
+
+    return oldAttachmentIds.size() == newAttachmentIds.size()
+        && newAttachmentIds.containsAll(oldAttachmentIds)
+        && oldClassificationIds.size() == newClassificationIds.size()
+        && newClassificationIds.containsAll(oldClassificationIds);
+  }
+
+  /**
+   * Ensure that planned and due of task comply with the associated service level. The 'planned'
+   * timestamp was calculated by subtracting the service level duration from task.due. It may not be
+   * the same as task.planned and the request may nevertheless be correct. The following Scenario
+   * illustrates this: If task.planned is on a Saturday morning, and duration is 1 working day, then
+   * calculating forward from planned to due will give Tuesday morning as due date, because sunday
+   * is skipped. On the other hand, calculating from due (Tuesday morning) 1 day backwards will
+   * result in a planned date of monday morning which differs from task.planned. Therefore, if
+   * task.planned is not equal to calcPlanned, the service level is not violated and we still must
+   * grant the request if the following conditions are fulfilled:
+   *
+   * <ul>
+   *   <li>task.planned is not a working day
+   *   <li>there are no working days between task.planned and calcPlanned
+   * </ul>
+   *
+   * @param task the task for the difference between planned and due must be duration
+   * @param duration the serviceLevel for the task
+   * @param calcPlanned the planned timestamp that was calculated based on due and duration
+   * @throws InvalidArgumentException if service level is violated.
+   */
+  private void ensureServiceLevelIsNotViolated(
+      TaskImpl task, Duration duration, Instant calcPlanned) throws InvalidArgumentException {
+    if (task.getPlanned() != null
+        && !task.getPlanned().equals(calcPlanned)
+        // manual entered planned date is a different working day than computed value
+        && (converter.isWorkingDay(task.getPlanned())
+            || converter.hasWorkingDaysInBetween(task.getPlanned(), calcPlanned))) {
+      throw new InvalidArgumentException(
+          String.format(
+              "Cannot update a task with given planned %s "
+                  + "and due date %s not matching the service level %s.",
+              task.getPlanned(), task.getDue(), duration));
+    }
+  }
+
+  private int determinePriorityForATask(
+      MinimalTaskSummary minimalTaskSummary,
+      Map<String, Integer> classificationIdToPriorityMap,
+      Map<String, Set<String>> taskIdToClassificationIdsMap) {
+    int actualPriority = 0;
+    for (String classificationId :
+        taskIdToClassificationIdsMap.get(minimalTaskSummary.getTaskId())) {
+      int prio = classificationIdToPriorityMap.get(classificationId);
+      if (prio > actualPriority) {
+        actualPriority = prio;
+      }
+    }
+    return actualPriority;
+  }
+
+  private Duration determineMinimalDurationForATask(
+      Set<String> classificationIds, Map<String, Duration> classificationIdDurationMap) {
+    Duration result = MAX_DURATION;
+    for (String classificationId : classificationIds) {
+      Duration actualDuration = classificationIdDurationMap.get(classificationId);
+      if (result.compareTo(actualDuration) > 0) {
+        result = actualDuration;
+      }
+    }
+    return result;
   }
 
   private void setPlannedDueOnMissingServiceLevel(TaskImpl task) {
@@ -185,49 +492,6 @@ class ServiceLevelHandler {
             taskMapper.updatePriorityOfTasks(taskIdList, referenceTask);
           }
         });
-  }
-
-  private Map<Integer, List<String>> getPriorityToTasksIdsMap(
-      List<MinimalTaskSummary> existingTasks,
-      List<AttachmentSummaryImpl> attachments,
-      List<ClassificationSummary> allInvolvedClassifications) {
-
-    Map<String, Integer> classificationIdToPriorityMap =
-        allInvolvedClassifications.stream()
-            .collect(
-                Collectors.toMap(ClassificationSummary::getId, ClassificationSummary::getPriority));
-
-    Map<String, Set<String>> taskIdToClassificationIdsMap =
-        getTaskIdToClassificationsMap(existingTasks, attachments);
-    List<TaskIdPriority> taskIdPriorities =
-        existingTasks.stream()
-            .map(
-                t ->
-                    new TaskIdPriority(
-                        t.getTaskId(),
-                        determinePriorityForATask(
-                            t, classificationIdToPriorityMap, taskIdToClassificationIdsMap)))
-            .collect(Collectors.toList());
-    return taskIdPriorities.stream()
-        .collect(
-            groupingBy(
-                TaskIdPriority::getPriority,
-                Collectors.mapping(TaskIdPriority::getTaskId, Collectors.toList())));
-  }
-
-  private int determinePriorityForATask(
-      MinimalTaskSummary minimalTaskSummary,
-      Map<String, Integer> classificationIdToPriorityMap,
-      Map<String, Set<String>> taskIdToClassificationIdsMap) {
-    int actualPriority = 0;
-    for (String classificationId :
-        taskIdToClassificationIdsMap.get(minimalTaskSummary.getTaskId())) {
-      int prio = classificationIdToPriorityMap.get(classificationId);
-      if (prio > actualPriority) {
-        actualPriority = prio;
-      }
-    }
-    return actualPriority;
   }
 
   private BulkLog updateTaskDueDatesOnClassificationUpdate(
@@ -278,58 +542,6 @@ class ServiceLevelHandler {
       newTaskImpl.setDue(calcDue);
     }
     return newTaskImpl;
-  }
-
-  private boolean dueIsUnchangedOrNull(Task newTask, Task oldTask) {
-    return newTask.getDue() == null || oldTask.getDue().equals(newTask.getDue());
-  }
-
-  private boolean plannedHasChanged(Task newTask, Task oldTask) {
-    return newTask.getPlanned() != null && !oldTask.getPlanned().equals(newTask.getPlanned());
-  }
-
-  private Instant getPrecedingWorkingDays(Instant instant, Duration days) {
-    return converter.subtractWorkingDaysFromInstant(instant, days);
-  }
-
-  private Instant getFollowingWorkingDays(Instant instant, Duration days) {
-    return converter.addWorkingDaysToInstant(instant, days);
-  }
-
-  /**
-   * Ensure that planned and due of task comply with the associated service level. The 'planned'
-   * timestamp was calculated by subtracting the service level duration from task.due. It may not be
-   * the same as task.planned and the request may nevertheless be correct. The following Scenario
-   * illustrates this: If task.planned is on a Saturday morning, and duration is 1 working day, then
-   * calculating forward from planned to due will give Tuesday morning as due date, because sunday
-   * is skipped. On the other hand, calculating from due (Tuesday morning) 1 day backwards will
-   * result in a planned date of monday morning which differs from task.planned. Therefore, if
-   * task.planned is not equal to calcPlanned, the service level is not violated and we still must
-   * grant the request if the following conditions are fulfilled:
-   *
-   * <ul>
-   *   <li>task.planned is not a working day
-   *   <li>there are no working days between task.planned and calcPlanned
-   * </ul>
-   *
-   * @param task the task for the difference between planned and due must be duration
-   * @param duration the serviceLevel for the task
-   * @param calcPlanned the planned timestamp that was calculated based on due and duration
-   * @throws InvalidArgumentException if service level is violated.
-   */
-  private void ensureServiceLevelIsNotViolated(
-      TaskImpl task, Duration duration, Instant calcPlanned) throws InvalidArgumentException {
-    if (task.getPlanned() != null
-        && !task.getPlanned().equals(calcPlanned)
-        // manual entered planned date is a different working day than computed value
-        && (converter.isWorkingDay(task.getPlanned())
-            || converter.hasWorkingDaysInBetween(task.getPlanned(), calcPlanned))) {
-      throw new InvalidArgumentException(
-          String.format(
-              "Cannot update a task with given planned %s "
-                  + "and due date %s not matching the service level %s.",
-              task.getPlanned(), task.getDue(), duration));
-    }
   }
 
   private TaskImpl updatePlannedDueOnCreationOfNewTask(
@@ -406,102 +618,6 @@ class ServiceLevelHandler {
     return bulkLog;
   }
 
-  private Map<Duration, List<String>> getDurationToTaskIdsMap(
-      List<MinimalTaskSummary> minimalTaskSummariesAuthorizedFor,
-      List<AttachmentSummaryImpl> attachments,
-      List<ClassificationWithServiceLevelResolved>
-          allInvolvedClassificationsWithServiceLevelResolved) {
-
-    List<TaskDuration> resultingTaskDurations = new ArrayList<>();
-    // Map taskId -> Set Of involved classification Ids
-    Map<String, Set<String>> taskIdToClassificationIdsMap =
-        getTaskIdToClassificationsMap(minimalTaskSummariesAuthorizedFor, attachments);
-    // Map classificationId -> Duration
-    Map<String, Duration> classificationIdToDurationMap =
-        allInvolvedClassificationsWithServiceLevelResolved.stream()
-            .collect(
-                Collectors.toMap(
-                    ClassificationWithServiceLevelResolved::getClassificationId,
-                    ClassificationWithServiceLevelResolved::getDurationFromClassification));
-    for (MinimalTaskSummary task : minimalTaskSummariesAuthorizedFor) {
-      Duration duration =
-          determineMinimalDurationForATask(
-              taskIdToClassificationIdsMap.get(task.getTaskId()), classificationIdToDurationMap);
-      TaskDuration taskDuration = new TaskDuration(task.getTaskId(), duration, task.getPlanned());
-      resultingTaskDurations.add(taskDuration);
-    }
-    return resultingTaskDurations.stream()
-        .collect(
-            groupingBy(
-                TaskDuration::getDuration,
-                Collectors.mapping(TaskDuration::getTaskId, Collectors.toList())));
-  }
-
-  private Map<InstantDurationHolder, List<TaskDuration>> getTasksPerPlannedAndDuration(
-      List<MinimalTaskSummary> minimalTaskSummaries,
-      List<AttachmentSummaryImpl> attachments,
-      List<ClassificationWithServiceLevelResolved>
-          allInvolvedClassificationsWithServiceLevelResolved) {
-
-    Map<String, Duration> durationPerClassificationId =
-        getClassificationIdToDurationMap(allInvolvedClassificationsWithServiceLevelResolved);
-
-    List<TaskDuration> resultingTaskDurations = new ArrayList<>();
-    // Map taskId -> Set Of involved classification Ids
-    Map<String, Set<String>> taskIdClassificationIdsMap =
-        getTaskIdToClassificationsMap(minimalTaskSummaries, attachments);
-
-    for (MinimalTaskSummary task : minimalTaskSummaries) {
-      Duration duration =
-          determineMinimalDurationForATask(
-              taskIdClassificationIdsMap.get(task.getTaskId()), durationPerClassificationId);
-
-      TaskDuration taskDuration = new TaskDuration(task.getTaskId(), duration, task.getPlanned());
-      resultingTaskDurations.add(taskDuration);
-    }
-    return resultingTaskDurations.stream().collect(groupingBy(TaskDuration::getPlannedDuration));
-  }
-
-  private Map<String, Duration> getClassificationIdToDurationMap(
-      List<ClassificationWithServiceLevelResolved>
-          allInvolvedClassificationsWithServiceLevelResolved) {
-    // Map classificationId -> Duration
-    return allInvolvedClassificationsWithServiceLevelResolved.stream()
-        .collect(
-            Collectors.toMap(
-                ClassificationWithServiceLevelResolved::getClassificationId,
-                ClassificationWithServiceLevelResolved::getDurationFromClassification));
-  }
-
-  private Duration determineMinimalDurationForATask(
-      Set<String> classificationIds, Map<String, Duration> classificationIdDurationMap) {
-    Duration result = MAX_DURATION;
-    for (String classificationId : classificationIds) {
-      Duration actualDuration = classificationIdDurationMap.get(classificationId);
-      if (result.compareTo(actualDuration) > 0) {
-        result = actualDuration;
-      }
-    }
-    return result;
-  }
-
-  // returns a map <taskId -> Set of ClassificationIds>
-  private Map<String, Set<String>> getTaskIdToClassificationsMap(
-      List<MinimalTaskSummary> minimalTaskSummaries, List<AttachmentSummaryImpl> attachments) {
-    Map<String, Set<String>> resultingTaskIdToClassificationIdsMap = new HashMap<>();
-    for (MinimalTaskSummary task : minimalTaskSummaries) {
-      Set<String> classificationIds =
-          attachments.stream()
-              .filter(a -> task.getTaskId().equals(a.getTaskId()))
-              .map(AttachmentSummaryImpl::getClassificationSummary)
-              .map(ClassificationSummary::getId)
-              .collect(Collectors.toSet());
-      classificationIds.add(task.getClassificationId());
-      resultingTaskIdToClassificationIdsMap.put(task.getTaskId(), classificationIds);
-    }
-    return resultingTaskIdToClassificationIdsMap;
-  }
-
   private List<ClassificationWithServiceLevelResolved> resolveDurationsInClassifications(
       List<ClassificationSummary> allInvolvedClassifications) {
     List<ClassificationWithServiceLevelResolved> result = new ArrayList<>();
@@ -512,122 +628,6 @@ class ServiceLevelHandler {
               classification.getId(), serviceLevel, classification.getPriority()));
     }
     return result;
-  }
-
-  private List<AttachmentSummaryImpl> getAttachmentSummaries(
-      List<MinimalTaskSummary> existingTasksAuthorizedFor) {
-    List<String> existingTaskIdsAuthorizedFor =
-        existingTasksAuthorizedFor.stream()
-            .map(MinimalTaskSummary::getTaskId)
-            .collect(Collectors.toList());
-
-    return existingTaskIdsAuthorizedFor.isEmpty()
-        ? new ArrayList<>()
-        : attachmentMapper.findAttachmentSummariesByTaskIds(existingTaskIdsAuthorizedFor);
-  }
-
-  private List<ClassificationSummary> findAllClassificationsReferencedByTasksAndAttachments(
-      List<MinimalTaskSummary> existingTasksAuthorizedFor,
-      List<AttachmentSummaryImpl> attachments) {
-    Set<String> classificationIds =
-        attachments.stream()
-            .map(AttachmentSummaryImpl::getClassificationSummary)
-            .map(ClassificationSummary::getId)
-            .collect(Collectors.toSet());
-    Set<String> classificationIdsFromTasks =
-        existingTasksAuthorizedFor.stream()
-            .map(MinimalTaskSummary::getClassificationId)
-            .collect(Collectors.toSet());
-    classificationIds.addAll(classificationIdsFromTasks);
-    if (classificationIds.isEmpty()) {
-      return new ArrayList<>();
-    } else {
-      String[] idsArrayForQuery = new String[classificationIds.size()];
-      idsArrayForQuery = classificationIds.toArray(idsArrayForQuery);
-      return taskanaEngine
-          .getEngine()
-          .getClassificationService()
-          .createClassificationQuery()
-          .idIn(idsArrayForQuery)
-          .list();
-    }
-  }
-
-  private DurationPrioHolder getFinalPrioDurationOfTask(
-      List<ClassificationWithServiceLevelResolved> cl, boolean onlyPriority) {
-    Duration duration = MAX_DURATION;
-    int priority = Integer.MIN_VALUE;
-    for (ClassificationWithServiceLevelResolved classification : cl) {
-      Duration actualDuration = classification.getDurationFromClassification();
-      if (!onlyPriority && duration.compareTo(actualDuration) > 0) {
-        duration = actualDuration;
-      }
-      if (classification.getPriority() > priority) {
-        priority = classification.getPriority();
-      }
-    }
-    return new DurationPrioHolder(duration, priority);
-  }
-
-  private Set<ClassificationSummary> getClassificationsReferencedByATask(TaskImpl taskImpl) {
-    Set<ClassificationSummary> classifications =
-        taskImpl.getAttachments() == null
-            ? new HashSet<>()
-            : taskImpl.getAttachments().stream()
-                .map(Attachment::getClassificationSummary)
-                .collect(Collectors.toSet());
-    classifications.add(taskImpl.getClassificationSummary());
-    return classifications;
-  }
-
-  private boolean isPriorityAndDurationAlreadyCorrect(TaskImpl newTaskImpl, TaskImpl oldTaskImpl) {
-    if (oldTaskImpl != null) {
-      final boolean isClassificationKeyChanged =
-          newTaskImpl.getClassificationKey() != null
-              && (oldTaskImpl.getClassificationKey() == null
-                  || !newTaskImpl
-                      .getClassificationKey()
-                      .equals(oldTaskImpl.getClassificationKey()));
-
-      final boolean isClassificationIdChanged =
-          newTaskImpl.getClassificationId() != null
-              && (oldTaskImpl.getClassificationId() == null
-                  || !newTaskImpl.getClassificationId().equals(oldTaskImpl.getClassificationId()));
-
-      return oldTaskImpl.getPlanned().equals(newTaskImpl.getPlanned())
-          && oldTaskImpl.getDue().equals(newTaskImpl.getDue())
-          && !isClassificationKeyChanged
-          && !isClassificationIdChanged
-          && areAttachmentsUnchanged(newTaskImpl, oldTaskImpl);
-    } else {
-      return false;
-    }
-  }
-
-  private boolean areAttachmentsUnchanged(TaskImpl newTaskImpl, TaskImpl oldTaskImpl) {
-    List<String> oldAttachmentIds =
-        oldTaskImpl.getAttachments().stream()
-            .map(AttachmentSummary::getId)
-            .collect(Collectors.toList());
-    List<String> newAttachmentIds =
-        newTaskImpl.getAttachments().stream()
-            .map(AttachmentSummary::getId)
-            .collect(Collectors.toList());
-    Set<String> oldClassificationIds =
-        oldTaskImpl.getAttachments().stream()
-            .map(Attachment::getClassificationSummary)
-            .map(ClassificationSummary::getId)
-            .collect(Collectors.toSet());
-    Set<String> newClassificationIds =
-        newTaskImpl.getAttachments().stream()
-            .map(Attachment::getClassificationSummary)
-            .map(ClassificationSummary::getId)
-            .collect(Collectors.toSet());
-
-    return oldAttachmentIds.size() == newAttachmentIds.size()
-        && newAttachmentIds.containsAll(oldAttachmentIds)
-        && oldClassificationIds.size() == newClassificationIds.size()
-        && newClassificationIds.containsAll(oldClassificationIds);
   }
 
   static class BulkLog extends BulkOperationResults<String, TaskanaException> {}

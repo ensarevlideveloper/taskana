@@ -131,45 +131,13 @@ public class TaskServiceImpl implements TaskService {
   }
 
   @Override
-  public Task claim(String taskId)
-      throws TaskNotFoundException, InvalidStateException, InvalidOwnerException,
-          NotAuthorizedException {
-    return claim(taskId, false);
+  public TaskQuery createTaskQuery() {
+    return new TaskQueryImpl(taskanaEngine);
   }
 
   @Override
-  public Task forceClaim(String taskId)
-      throws TaskNotFoundException, InvalidStateException, InvalidOwnerException,
-          NotAuthorizedException {
-    return claim(taskId, true);
-  }
-
-  @Override
-  public Task cancelClaim(String taskId)
-      throws TaskNotFoundException, InvalidStateException, InvalidOwnerException,
-          NotAuthorizedException {
-    return this.cancelClaim(taskId, false);
-  }
-
-  @Override
-  public Task forceCancelClaim(String taskId)
-      throws TaskNotFoundException, InvalidStateException, InvalidOwnerException,
-          NotAuthorizedException {
-    return this.cancelClaim(taskId, true);
-  }
-
-  @Override
-  public Task completeTask(String taskId)
-      throws TaskNotFoundException, InvalidOwnerException, InvalidStateException,
-          NotAuthorizedException {
-    return completeTask(taskId, false);
-  }
-
-  @Override
-  public Task forceCompleteTask(String taskId)
-      throws TaskNotFoundException, InvalidOwnerException, InvalidStateException,
-          NotAuthorizedException {
-    return completeTask(taskId, true);
+  public TaskCommentQuery createTaskCommentQuery() {
+    return new TaskCommentQueryImpl(taskanaEngine);
   }
 
   @Override
@@ -289,6 +257,47 @@ public class TaskServiceImpl implements TaskService {
   }
 
   @Override
+  public Task newTask() {
+    return newTask(null);
+  }
+
+  @Override
+  public Task newTask(String workbasketId) {
+    TaskImpl task = new TaskImpl();
+    WorkbasketSummaryImpl wb = new WorkbasketSummaryImpl();
+    wb.setId(workbasketId);
+    task.setWorkbasketSummary(wb);
+    task.setCallbackState(CallbackState.NONE);
+    return task;
+  }
+
+  @Override
+  public Task newTask(String workbasketKey, String domain) {
+    TaskImpl task = new TaskImpl();
+    WorkbasketSummaryImpl wb = new WorkbasketSummaryImpl();
+    wb.setKey(workbasketKey);
+    wb.setDomain(domain);
+    task.setWorkbasketSummary(wb);
+    return task;
+  }
+
+  @Override
+  public TaskComment newTaskComment(String taskId) {
+    return taskCommentService.newTaskComment(taskId);
+  }
+
+  @Override
+  public Attachment newAttachment() {
+    return new AttachmentImpl();
+  }
+
+  @Override
+  public TaskComment createTaskComment(TaskComment taskComment)
+      throws NotAuthorizedException, TaskNotFoundException, InvalidArgumentException {
+    return taskCommentService.createTaskComment(taskComment);
+  }
+
+  @Override
   public Task getTask(String id) throws NotAuthorizedException, TaskNotFoundException {
     try {
       taskanaEngine.openConnection();
@@ -345,345 +354,45 @@ public class TaskServiceImpl implements TaskService {
     }
   }
 
-  @Override
-  public Task transfer(String taskId, String destinationWorkbasketId, boolean setTransferFlag)
-      throws TaskNotFoundException, WorkbasketNotFoundException, NotAuthorizedException,
-          InvalidStateException {
-    return taskTransferrer.transfer(taskId, destinationWorkbasketId, setTransferFlag);
-  }
+  public List<String> findTasksIdsAffectedByClassificationChange(String classificationId) {
+    // tasks directly affected
+    List<TaskSummary> tasksAffectedDirectly =
+        createTaskQuery()
+            .classificationIdIn(classificationId)
+            .stateIn(TaskState.READY, TaskState.CLAIMED)
+            .list();
 
-  @Override
-  public Task transfer(String taskId, String workbasketKey, String domain, boolean setTransferFlag)
-      throws TaskNotFoundException, WorkbasketNotFoundException, NotAuthorizedException,
-          InvalidStateException {
-    return taskTransferrer.transfer(taskId, workbasketKey, domain, setTransferFlag);
-  }
+    // tasks indirectly affected via attachments
+    List<Pair<String, Instant>> affectedPairs =
+        tasksAffectedDirectly.stream()
+            .map(t -> Pair.of(t.getId(), t.getPlanned()))
+            .collect(Collectors.toList());
+    // tasks indirectly affected via attachments
+    List<Pair<String, Instant>> taskIdsAndPlannedFromAttachments =
+        attachmentMapper.findTaskIdsAndPlannedAffectedByClassificationChange(classificationId);
 
-  @Override
-  public Task setTaskRead(String taskId, boolean isRead)
-      throws TaskNotFoundException, NotAuthorizedException {
-    TaskImpl task;
-    try {
-      taskanaEngine.openConnection();
-      task = (TaskImpl) getTask(taskId);
-      task.setRead(isRead);
-      task.setModified(Instant.now());
-      taskMapper.update(task);
-      if (LOGGER.isDebugEnabled()) {
-        LOGGER.debug("Method setTaskRead() set read property of Task '{}' to {} ", task, isRead);
-      }
-      return task;
-    } finally {
-      taskanaEngine.returnConnection();
+    List<String> taskIdsFromAttachments =
+        taskIdsAndPlannedFromAttachments.stream().map(Pair::getLeft).collect(Collectors.toList());
+    List<Pair<String, Instant>> filteredTaskIdsAndPlannedFromAttachments =
+        taskIdsFromAttachments.isEmpty()
+            ? new ArrayList<>()
+            : taskMapper.filterTaskIdsForReadyAndClaimed(taskIdsFromAttachments);
+    affectedPairs.addAll(filteredTaskIdsAndPlannedFromAttachments);
+    //  sort all affected tasks according to the planned instant
+    List<String> affectedTaskIds =
+        affectedPairs.stream()
+            .sorted(Comparator.comparing(Pair::getRight))
+            .distinct()
+            .map(Pair::getLeft)
+            .collect(Collectors.toList());
+
+    if (LOGGER.isDebugEnabled()) {
+      LOGGER.debug(
+          "the following tasks are affected by the update of classification {} : {}",
+          classificationId,
+          affectedTaskIds);
     }
-  }
-
-  @Override
-  public TaskQuery createTaskQuery() {
-    return new TaskQueryImpl(taskanaEngine);
-  }
-
-  @Override
-  public TaskCommentQuery createTaskCommentQuery() {
-    return new TaskCommentQueryImpl(taskanaEngine);
-  }
-
-  @Override
-  public Task newTask() {
-    return newTask(null);
-  }
-
-  @Override
-  public Task newTask(String workbasketId) {
-    TaskImpl task = new TaskImpl();
-    WorkbasketSummaryImpl wb = new WorkbasketSummaryImpl();
-    wb.setId(workbasketId);
-    task.setWorkbasketSummary(wb);
-    task.setCallbackState(CallbackState.NONE);
-    return task;
-  }
-
-  @Override
-  public Task newTask(String workbasketKey, String domain) {
-    TaskImpl task = new TaskImpl();
-    WorkbasketSummaryImpl wb = new WorkbasketSummaryImpl();
-    wb.setKey(workbasketKey);
-    wb.setDomain(domain);
-    task.setWorkbasketSummary(wb);
-    return task;
-  }
-
-  @Override
-  public TaskComment newTaskComment(String taskId) {
-    return taskCommentService.newTaskComment(taskId);
-  }
-
-  @Override
-  public Attachment newAttachment() {
-    return new AttachmentImpl();
-  }
-
-  @Override
-  public Task updateTask(Task task)
-      throws InvalidArgumentException, TaskNotFoundException, ConcurrencyException,
-          NotAuthorizedException, AttachmentPersistenceException, InvalidStateException,
-          ClassificationNotFoundException {
-    String userId = taskanaEngine.getEngine().getCurrentUserContext().getUserid();
-    TaskImpl newTaskImpl = (TaskImpl) task;
-    try {
-      taskanaEngine.openConnection();
-      TaskImpl oldTaskImpl = (TaskImpl) getTask(newTaskImpl.getId());
-
-      checkConcurrencyAndSetModified(newTaskImpl, oldTaskImpl);
-
-      attachmentHandler.insertAndDeleteAttachmentsOnTaskUpdate(newTaskImpl, oldTaskImpl);
-      ObjectReference.validate(newTaskImpl.getPrimaryObjRef(), "primary ObjectReference", "Task");
-
-      standardUpdateActions(oldTaskImpl, newTaskImpl);
-
-      priorityServiceManager
-          .calculatePriorityOfTask(newTaskImpl)
-          .ifPresent(newTaskImpl::setPriority);
-
-      taskMapper.update(newTaskImpl);
-
-      if (LOGGER.isDebugEnabled()) {
-        LOGGER.debug("Method updateTask() updated task '{}' for user '{}'.", task.getId(), userId);
-      }
-
-      if (historyEventManager.isEnabled()) {
-
-        String changeDetails =
-            ObjectAttributeChangeDetector.determineChangesInAttributes(oldTaskImpl, newTaskImpl);
-
-        historyEventManager.createEvent(
-            new TaskUpdatedEvent(
-                IdGenerator.generateWithPrefix(IdGenerator.ID_PREFIX_TASK_HISTORY_EVENT),
-                task,
-                taskanaEngine.getEngine().getCurrentUserContext().getUserid(),
-                changeDetails));
-      }
-
-    } finally {
-      taskanaEngine.returnConnection();
-    }
-    return task;
-  }
-
-  @Override
-  public BulkOperationResults<String, TaskanaException> transferTasks(
-      String destinationWorkbasketId, List<String> taskIds, boolean setTransferFlag)
-      throws NotAuthorizedException, InvalidArgumentException, WorkbasketNotFoundException {
-    return taskTransferrer.transfer(taskIds, destinationWorkbasketId, setTransferFlag);
-  }
-
-  @Override
-  public BulkOperationResults<String, TaskanaException> transferTasks(
-      String destinationWorkbasketKey,
-      String destinationWorkbasketDomain,
-      List<String> taskIds,
-      boolean setTransferFlag)
-      throws NotAuthorizedException, InvalidArgumentException, WorkbasketNotFoundException {
-    return taskTransferrer.transfer(
-        taskIds, destinationWorkbasketKey, destinationWorkbasketDomain, setTransferFlag);
-  }
-
-  @Override
-  public void deleteTask(String taskId)
-      throws TaskNotFoundException, InvalidStateException, NotAuthorizedException {
-    deleteTask(taskId, false);
-  }
-
-  @Override
-  public void forceDeleteTask(String taskId)
-      throws TaskNotFoundException, InvalidStateException, NotAuthorizedException {
-    deleteTask(taskId, true);
-  }
-
-  @Override
-  public Task selectAndClaim(TaskQuery taskQuery)
-      throws NotAuthorizedException, InvalidOwnerException {
-
-    try {
-
-      taskanaEngine.openConnection();
-
-      ((TaskQueryImpl) taskQuery).selectAndClaimEquals(true);
-
-      TaskSummary taskSummary = taskQuery.single();
-
-      if (taskSummary == null) {
-        throw new SystemException(
-            "No tasks matched the specified filter and sorting options,"
-                + " task query returned nothing!");
-      }
-
-      return claim(taskSummary.getId());
-
-    } catch (InvalidStateException | TaskNotFoundException e) {
-      throw new SystemException("Caught exception ", e);
-    } finally {
-      taskanaEngine.returnConnection();
-    }
-  }
-
-  @Override
-  public BulkOperationResults<String, TaskanaException> deleteTasks(List<String> taskIds)
-      throws InvalidArgumentException, NotAuthorizedException {
-
-    taskanaEngine.getEngine().checkRoleMembership(TaskanaRole.ADMIN);
-
-    try {
-      taskanaEngine.openConnection();
-      if (taskIds == null) {
-        throw new InvalidArgumentException("List of TaskIds must not be null.");
-      }
-      taskIds = new ArrayList<>(taskIds);
-
-      BulkOperationResults<String, TaskanaException> bulkLog = new BulkOperationResults<>();
-
-      if (taskIds.isEmpty()) {
-        return bulkLog;
-      }
-
-      List<MinimalTaskSummary> taskSummaries = taskMapper.findExistingTasks(taskIds, null);
-
-      Iterator<String> taskIdIterator = taskIds.iterator();
-      while (taskIdIterator.hasNext()) {
-        removeSingleTaskForTaskDeletionById(bulkLog, taskSummaries, taskIdIterator);
-      }
-
-      if (!taskIds.isEmpty()) {
-        attachmentMapper.deleteMultipleByTaskIds(taskIds);
-        taskMapper.deleteMultiple(taskIds);
-
-        if (taskanaEngine.getEngine().isHistoryEnabled()
-            && taskanaEngine
-                .getEngine()
-                .getConfiguration()
-                .isDeleteHistoryOnTaskDeletionEnabled()) {
-          historyEventManager.deleteEvents(taskIds);
-        }
-      }
-      return bulkLog;
-    } finally {
-      taskanaEngine.returnConnection();
-    }
-  }
-
-  @Override
-  public BulkOperationResults<String, TaskanaException> completeTasks(List<String> taskIds)
-      throws InvalidArgumentException {
-    return completeTasks(taskIds, false);
-  }
-
-  @Override
-  public BulkOperationResults<String, TaskanaException> forceCompleteTasks(List<String> taskIds)
-      throws InvalidArgumentException {
-    return completeTasks(taskIds, true);
-  }
-
-  @Override
-  public List<String> updateTasks(
-      ObjectReference selectionCriteria, Map<TaskCustomField, String> customFieldsToUpdate)
-      throws InvalidArgumentException {
-
-    ObjectReference.validate(selectionCriteria, "ObjectReference", "updateTasks call");
-    validateCustomFields(customFieldsToUpdate);
-    TaskCustomPropertySelector fieldSelector = new TaskCustomPropertySelector();
-    TaskImpl updated = initUpdatedTask(customFieldsToUpdate, fieldSelector);
-
-    try {
-      taskanaEngine.openConnection();
-
-      // use query in order to find only those tasks that are visible to the current user
-      List<TaskSummary> taskSummaries = getTasksToChange(selectionCriteria);
-
-      List<String> changedTasks = new ArrayList<>();
-      if (!taskSummaries.isEmpty()) {
-        changedTasks = taskSummaries.stream().map(TaskSummary::getId).collect(Collectors.toList());
-        taskMapper.updateTasks(changedTasks, updated, fieldSelector);
-        if (LOGGER.isDebugEnabled()) {
-          LOGGER.debug("updateTasks() updated the following tasks: {} ", changedTasks);
-        }
-
-      } else {
-        if (LOGGER.isDebugEnabled()) {
-          LOGGER.debug("updateTasks() found no tasks for update ");
-        }
-      }
-      return changedTasks;
-    } finally {
-      taskanaEngine.returnConnection();
-    }
-  }
-
-  @Override
-  public List<String> updateTasks(
-      List<String> taskIds, Map<TaskCustomField, String> customFieldsToUpdate)
-      throws InvalidArgumentException {
-
-    validateCustomFields(customFieldsToUpdate);
-    TaskCustomPropertySelector fieldSelector = new TaskCustomPropertySelector();
-    TaskImpl updatedTask = initUpdatedTask(customFieldsToUpdate, fieldSelector);
-
-    try {
-      taskanaEngine.openConnection();
-
-      // use query in order to find only those tasks that are visible to the current user
-      List<TaskSummary> taskSummaries = getTasksToChange(taskIds);
-
-      List<String> changedTasks = new ArrayList<>();
-      if (!taskSummaries.isEmpty()) {
-        changedTasks = taskSummaries.stream().map(TaskSummary::getId).collect(Collectors.toList());
-        taskMapper.updateTasks(changedTasks, updatedTask, fieldSelector);
-        if (LOGGER.isDebugEnabled()) {
-          LOGGER.debug("updateTasks() updated the following tasks: {} ", changedTasks);
-        }
-
-      } else {
-        if (LOGGER.isDebugEnabled()) {
-          LOGGER.debug("updateTasks() found no tasks for update ");
-        }
-      }
-      return changedTasks;
-    } finally {
-      taskanaEngine.returnConnection();
-    }
-  }
-
-  @Override
-  public TaskComment createTaskComment(TaskComment taskComment)
-      throws NotAuthorizedException, TaskNotFoundException, InvalidArgumentException {
-    return taskCommentService.createTaskComment(taskComment);
-  }
-
-  @Override
-  public TaskComment updateTaskComment(TaskComment taskComment)
-      throws NotAuthorizedException, ConcurrencyException, TaskCommentNotFoundException,
-          TaskNotFoundException, InvalidArgumentException {
-    return taskCommentService.updateTaskComment(taskComment);
-  }
-
-  @Override
-  public void deleteTaskComment(String taskCommentId)
-      throws NotAuthorizedException, TaskCommentNotFoundException, TaskNotFoundException,
-          InvalidArgumentException {
-    taskCommentService.deleteTaskComment(taskCommentId);
-  }
-
-  @Override
-  public TaskComment getTaskComment(String taskCommentid)
-      throws TaskCommentNotFoundException, NotAuthorizedException, TaskNotFoundException,
-          InvalidArgumentException {
-    return taskCommentService.getTaskComment(taskCommentid);
-  }
-
-  @Override
-  public List<TaskComment> getTaskComments(String taskId)
-      throws NotAuthorizedException, TaskNotFoundException {
-
-    return taskCommentService.getTaskComments(taskId);
+    return affectedTaskIds;
   }
 
   @Override
@@ -823,45 +532,273 @@ public class TaskServiceImpl implements TaskService {
     return terminatedTask;
   }
 
-  public List<String> findTasksIdsAffectedByClassificationChange(String classificationId) {
-    // tasks directly affected
-    List<TaskSummary> tasksAffectedDirectly =
-        createTaskQuery()
-            .classificationIdIn(classificationId)
-            .stateIn(TaskState.READY, TaskState.CLAIMED)
-            .list();
+  @Override
+  public Task claim(String taskId)
+      throws TaskNotFoundException, InvalidStateException, InvalidOwnerException,
+          NotAuthorizedException {
+    return claim(taskId, false);
+  }
 
-    // tasks indirectly affected via attachments
-    List<Pair<String, Instant>> affectedPairs =
-        tasksAffectedDirectly.stream()
-            .map(t -> Pair.of(t.getId(), t.getPlanned()))
-            .collect(Collectors.toList());
-    // tasks indirectly affected via attachments
-    List<Pair<String, Instant>> taskIdsAndPlannedFromAttachments =
-        attachmentMapper.findTaskIdsAndPlannedAffectedByClassificationChange(classificationId);
+  @Override
+  public Task forceClaim(String taskId)
+      throws TaskNotFoundException, InvalidStateException, InvalidOwnerException,
+          NotAuthorizedException {
+    return claim(taskId, true);
+  }
 
-    List<String> taskIdsFromAttachments =
-        taskIdsAndPlannedFromAttachments.stream().map(Pair::getLeft).collect(Collectors.toList());
-    List<Pair<String, Instant>> filteredTaskIdsAndPlannedFromAttachments =
-        taskIdsFromAttachments.isEmpty()
-            ? new ArrayList<>()
-            : taskMapper.filterTaskIdsForReadyAndClaimed(taskIdsFromAttachments);
-    affectedPairs.addAll(filteredTaskIdsAndPlannedFromAttachments);
-    //  sort all affected tasks according to the planned instant
-    List<String> affectedTaskIds =
-        affectedPairs.stream()
-            .sorted(Comparator.comparing(Pair::getRight))
-            .distinct()
-            .map(Pair::getLeft)
-            .collect(Collectors.toList());
+  @Override
+  public Task cancelClaim(String taskId)
+      throws TaskNotFoundException, InvalidStateException, InvalidOwnerException,
+          NotAuthorizedException {
+    return this.cancelClaim(taskId, false);
+  }
 
-    if (LOGGER.isDebugEnabled()) {
-      LOGGER.debug(
-          "the following tasks are affected by the update of classification {} : {}",
-          classificationId,
-          affectedTaskIds);
+  @Override
+  public Task forceCancelClaim(String taskId)
+      throws TaskNotFoundException, InvalidStateException, InvalidOwnerException,
+          NotAuthorizedException {
+    return this.cancelClaim(taskId, true);
+  }
+
+  @Override
+  public Task completeTask(String taskId)
+      throws TaskNotFoundException, InvalidOwnerException, InvalidStateException,
+          NotAuthorizedException {
+    return completeTask(taskId, false);
+  }
+
+  @Override
+  public Task forceCompleteTask(String taskId)
+      throws TaskNotFoundException, InvalidOwnerException, InvalidStateException,
+          NotAuthorizedException {
+    return completeTask(taskId, true);
+  }
+
+  @Override
+  public Task transfer(String taskId, String destinationWorkbasketId, boolean setTransferFlag)
+      throws TaskNotFoundException, WorkbasketNotFoundException, NotAuthorizedException,
+          InvalidStateException {
+    return taskTransferrer.transfer(taskId, destinationWorkbasketId, setTransferFlag);
+  }
+
+  @Override
+  public Task transfer(String taskId, String workbasketKey, String domain, boolean setTransferFlag)
+      throws TaskNotFoundException, WorkbasketNotFoundException, NotAuthorizedException,
+          InvalidStateException {
+    return taskTransferrer.transfer(taskId, workbasketKey, domain, setTransferFlag);
+  }
+
+  @Override
+  public Task setTaskRead(String taskId, boolean isRead)
+      throws TaskNotFoundException, NotAuthorizedException {
+    TaskImpl task;
+    try {
+      taskanaEngine.openConnection();
+      task = (TaskImpl) getTask(taskId);
+      task.setRead(isRead);
+      task.setModified(Instant.now());
+      taskMapper.update(task);
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.debug("Method setTaskRead() set read property of Task '{}' to {} ", task, isRead);
+      }
+      return task;
+    } finally {
+      taskanaEngine.returnConnection();
     }
-    return affectedTaskIds;
+  }
+
+  @Override
+  public TaskComment getTaskComment(String taskCommentid)
+      throws TaskCommentNotFoundException, NotAuthorizedException, TaskNotFoundException,
+          InvalidArgumentException {
+    return taskCommentService.getTaskComment(taskCommentid);
+  }
+
+  @Override
+  public List<TaskComment> getTaskComments(String taskId)
+      throws NotAuthorizedException, TaskNotFoundException {
+
+    return taskCommentService.getTaskComments(taskId);
+  }
+
+  @Override
+  public Task updateTask(Task task)
+      throws InvalidArgumentException, TaskNotFoundException, ConcurrencyException,
+          NotAuthorizedException, AttachmentPersistenceException, InvalidStateException,
+          ClassificationNotFoundException {
+    String userId = taskanaEngine.getEngine().getCurrentUserContext().getUserid();
+    TaskImpl newTaskImpl = (TaskImpl) task;
+    try {
+      taskanaEngine.openConnection();
+      TaskImpl oldTaskImpl = (TaskImpl) getTask(newTaskImpl.getId());
+
+      checkConcurrencyAndSetModified(newTaskImpl, oldTaskImpl);
+
+      attachmentHandler.insertAndDeleteAttachmentsOnTaskUpdate(newTaskImpl, oldTaskImpl);
+      ObjectReference.validate(newTaskImpl.getPrimaryObjRef(), "primary ObjectReference", "Task");
+
+      standardUpdateActions(oldTaskImpl, newTaskImpl);
+
+      priorityServiceManager
+          .calculatePriorityOfTask(newTaskImpl)
+          .ifPresent(newTaskImpl::setPriority);
+
+      taskMapper.update(newTaskImpl);
+
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.debug("Method updateTask() updated task '{}' for user '{}'.", task.getId(), userId);
+      }
+
+      if (historyEventManager.isEnabled()) {
+
+        String changeDetails =
+            ObjectAttributeChangeDetector.determineChangesInAttributes(oldTaskImpl, newTaskImpl);
+
+        historyEventManager.createEvent(
+            new TaskUpdatedEvent(
+                IdGenerator.generateWithPrefix(IdGenerator.ID_PREFIX_TASK_HISTORY_EVENT),
+                task,
+                taskanaEngine.getEngine().getCurrentUserContext().getUserid(),
+                changeDetails));
+      }
+
+    } finally {
+      taskanaEngine.returnConnection();
+    }
+    return task;
+  }
+
+  @Override
+  public BulkOperationResults<String, TaskanaException> transferTasks(
+      String destinationWorkbasketId, List<String> taskIds, boolean setTransferFlag)
+      throws NotAuthorizedException, InvalidArgumentException, WorkbasketNotFoundException {
+    return taskTransferrer.transfer(taskIds, destinationWorkbasketId, setTransferFlag);
+  }
+
+  @Override
+  public BulkOperationResults<String, TaskanaException> transferTasks(
+      String destinationWorkbasketKey,
+      String destinationWorkbasketDomain,
+      List<String> taskIds,
+      boolean setTransferFlag)
+      throws NotAuthorizedException, InvalidArgumentException, WorkbasketNotFoundException {
+    return taskTransferrer.transfer(
+        taskIds, destinationWorkbasketKey, destinationWorkbasketDomain, setTransferFlag);
+  }
+
+  @Override
+  public Task selectAndClaim(TaskQuery taskQuery)
+      throws NotAuthorizedException, InvalidOwnerException {
+
+    try {
+
+      taskanaEngine.openConnection();
+
+      ((TaskQueryImpl) taskQuery).selectAndClaimEquals(true);
+
+      TaskSummary taskSummary = taskQuery.single();
+
+      if (taskSummary == null) {
+        throw new SystemException(
+            "No tasks matched the specified filter and sorting options,"
+                + " task query returned nothing!");
+      }
+
+      return claim(taskSummary.getId());
+
+    } catch (InvalidStateException | TaskNotFoundException e) {
+      throw new SystemException("Caught exception ", e);
+    } finally {
+      taskanaEngine.returnConnection();
+    }
+  }
+
+  @Override
+  public BulkOperationResults<String, TaskanaException> completeTasks(List<String> taskIds)
+      throws InvalidArgumentException {
+    return completeTasks(taskIds, false);
+  }
+
+  @Override
+  public BulkOperationResults<String, TaskanaException> forceCompleteTasks(List<String> taskIds)
+      throws InvalidArgumentException {
+    return completeTasks(taskIds, true);
+  }
+
+  @Override
+  public List<String> updateTasks(
+      ObjectReference selectionCriteria, Map<TaskCustomField, String> customFieldsToUpdate)
+      throws InvalidArgumentException {
+
+    ObjectReference.validate(selectionCriteria, "ObjectReference", "updateTasks call");
+    validateCustomFields(customFieldsToUpdate);
+    TaskCustomPropertySelector fieldSelector = new TaskCustomPropertySelector();
+    TaskImpl updated = initUpdatedTask(customFieldsToUpdate, fieldSelector);
+
+    try {
+      taskanaEngine.openConnection();
+
+      // use query in order to find only those tasks that are visible to the current user
+      List<TaskSummary> taskSummaries = getTasksToChange(selectionCriteria);
+
+      List<String> changedTasks = new ArrayList<>();
+      if (!taskSummaries.isEmpty()) {
+        changedTasks = taskSummaries.stream().map(TaskSummary::getId).collect(Collectors.toList());
+        taskMapper.updateTasks(changedTasks, updated, fieldSelector);
+        if (LOGGER.isDebugEnabled()) {
+          LOGGER.debug("updateTasks() updated the following tasks: {} ", changedTasks);
+        }
+
+      } else {
+        if (LOGGER.isDebugEnabled()) {
+          LOGGER.debug("updateTasks() found no tasks for update ");
+        }
+      }
+      return changedTasks;
+    } finally {
+      taskanaEngine.returnConnection();
+    }
+  }
+
+  @Override
+  public List<String> updateTasks(
+      List<String> taskIds, Map<TaskCustomField, String> customFieldsToUpdate)
+      throws InvalidArgumentException {
+
+    validateCustomFields(customFieldsToUpdate);
+    TaskCustomPropertySelector fieldSelector = new TaskCustomPropertySelector();
+    TaskImpl updatedTask = initUpdatedTask(customFieldsToUpdate, fieldSelector);
+
+    try {
+      taskanaEngine.openConnection();
+
+      // use query in order to find only those tasks that are visible to the current user
+      List<TaskSummary> taskSummaries = getTasksToChange(taskIds);
+
+      List<String> changedTasks = new ArrayList<>();
+      if (!taskSummaries.isEmpty()) {
+        changedTasks = taskSummaries.stream().map(TaskSummary::getId).collect(Collectors.toList());
+        taskMapper.updateTasks(changedTasks, updatedTask, fieldSelector);
+        if (LOGGER.isDebugEnabled()) {
+          LOGGER.debug("updateTasks() updated the following tasks: {} ", changedTasks);
+        }
+
+      } else {
+        if (LOGGER.isDebugEnabled()) {
+          LOGGER.debug("updateTasks() found no tasks for update ");
+        }
+      }
+      return changedTasks;
+    } finally {
+      taskanaEngine.returnConnection();
+    }
+  }
+
+  @Override
+  public TaskComment updateTaskComment(TaskComment taskComment)
+      throws NotAuthorizedException, ConcurrencyException, TaskCommentNotFoundException,
+          TaskNotFoundException, InvalidArgumentException {
+    return taskCommentService.updateTaskComment(taskComment);
   }
 
   public void refreshPriorityAndDueDatesOfTasksOnClassificationUpdate(
@@ -888,6 +825,69 @@ public class TaskServiceImpl implements TaskService {
     } finally {
       taskanaEngine.returnConnection();
     }
+  }
+
+  @Override
+  public void deleteTask(String taskId)
+      throws TaskNotFoundException, InvalidStateException, NotAuthorizedException {
+    deleteTask(taskId, false);
+  }
+
+  @Override
+  public void forceDeleteTask(String taskId)
+      throws TaskNotFoundException, InvalidStateException, NotAuthorizedException {
+    deleteTask(taskId, true);
+  }
+
+  @Override
+  public BulkOperationResults<String, TaskanaException> deleteTasks(List<String> taskIds)
+      throws InvalidArgumentException, NotAuthorizedException {
+
+    taskanaEngine.getEngine().checkRoleMembership(TaskanaRole.ADMIN);
+
+    try {
+      taskanaEngine.openConnection();
+      if (taskIds == null) {
+        throw new InvalidArgumentException("List of TaskIds must not be null.");
+      }
+      taskIds = new ArrayList<>(taskIds);
+
+      BulkOperationResults<String, TaskanaException> bulkLog = new BulkOperationResults<>();
+
+      if (taskIds.isEmpty()) {
+        return bulkLog;
+      }
+
+      List<MinimalTaskSummary> taskSummaries = taskMapper.findExistingTasks(taskIds, null);
+
+      Iterator<String> taskIdIterator = taskIds.iterator();
+      while (taskIdIterator.hasNext()) {
+        removeSingleTaskForTaskDeletionById(bulkLog, taskSummaries, taskIdIterator);
+      }
+
+      if (!taskIds.isEmpty()) {
+        attachmentMapper.deleteMultipleByTaskIds(taskIds);
+        taskMapper.deleteMultiple(taskIds);
+
+        if (taskanaEngine.getEngine().isHistoryEnabled()
+            && taskanaEngine
+                .getEngine()
+                .getConfiguration()
+                .isDeleteHistoryOnTaskDeletionEnabled()) {
+          historyEventManager.deleteEvents(taskIds);
+        }
+      }
+      return bulkLog;
+    } finally {
+      taskanaEngine.returnConnection();
+    }
+  }
+
+  @Override
+  public void deleteTaskComment(String taskCommentId)
+      throws NotAuthorizedException, TaskCommentNotFoundException, TaskNotFoundException,
+          InvalidArgumentException {
+    taskCommentService.deleteTaskComment(taskCommentId);
   }
 
   Pair<List<MinimalTaskSummary>, BulkLog> getMinimalTaskSummaries(Collection<String> argTaskIds) {
@@ -973,6 +973,175 @@ public class TaskServiceImpl implements TaskService {
       }
     }
     return Pair.of(filteredTasks, bulkLog);
+  }
+
+  private Map<String, WorkbasketSummary> findWorkbasketsForTasks(
+      List<? extends TaskSummary> taskSummaries) {
+    if (taskSummaries == null || taskSummaries.isEmpty()) {
+      return Collections.emptyMap();
+    }
+
+    Set<String> workbasketIds =
+        taskSummaries.stream()
+            .map(TaskSummary::getWorkbasketSummary)
+            .map(WorkbasketSummary::getId)
+            .collect(Collectors.toSet());
+
+    return queryWorkbasketsForTasks(workbasketIds).stream()
+        .collect(Collectors.toMap(WorkbasketSummary::getId, Function.identity()));
+  }
+
+  private Map<String, ClassificationSummary> findClassificationsForTasksAndAttachments(
+      List<? extends TaskSummary> taskSummaries,
+      List<? extends AttachmentSummaryImpl> attachmentSummaries) {
+    if (taskSummaries == null || taskSummaries.isEmpty()) {
+      return Collections.emptyMap();
+    }
+
+    Set<String> classificationIds =
+        Stream.concat(
+                taskSummaries.stream().map(TaskSummary::getClassificationSummary),
+                attachmentSummaries.stream().map(AttachmentSummary::getClassificationSummary))
+            .map(ClassificationSummary::getId)
+            .collect(Collectors.toSet());
+
+    return queryClassificationsForTasksAndAttachments(classificationIds).stream()
+        .collect(Collectors.toMap(ClassificationSummary::getId, Function.identity()));
+  }
+
+  private Map<String, ClassificationSummary> findClassificationForTaskImplAndAttachments(
+      TaskImpl task, List<AttachmentImpl> attachmentImpls) {
+    return findClassificationsForTasksAndAttachments(
+        Collections.singletonList(task), attachmentImpls);
+  }
+
+  private List<ClassificationSummary> queryClassificationsForTasksAndAttachments(
+      Set<String> classificationIds) {
+
+    if (LOGGER.isDebugEnabled()) {
+      LOGGER.debug(
+          "queryClassificationsForTasksAndAttachments() about to query classifications and exit");
+    }
+    return this.classificationService
+        .createClassificationQuery()
+        .idIn(classificationIds.toArray(new String[0]))
+        .list();
+  }
+
+  private List<WorkbasketSummary> queryWorkbasketsForTasks(Set<String> workbasketIds) {
+
+    if (LOGGER.isDebugEnabled()) {
+      LOGGER.debug("queryWorkbasketsForTasks() about to query workbaskets and exit");
+    }
+    // perform classification query
+    return this.workbasketService
+        .createWorkbasketQuery()
+        .idIn(workbasketIds.toArray(new String[0]))
+        .list();
+  }
+
+  private void validateCustomFields(Map<TaskCustomField, String> customFieldsToUpdate)
+      throws InvalidArgumentException {
+
+    if (customFieldsToUpdate == null || customFieldsToUpdate.isEmpty()) {
+      throw new InvalidArgumentException(
+          "The customFieldsToUpdate argument to updateTasks must not be empty.");
+    }
+  }
+
+  private List<TaskSummary> getTasksToChange(List<String> taskIds) {
+    return createTaskQuery().idIn(taskIds.toArray(new String[0])).list();
+  }
+
+  private List<TaskSummary> getTasksToChange(ObjectReference selectionCriteria) {
+    return createTaskQuery()
+        .primaryObjectReferenceCompanyIn(selectionCriteria.getCompany())
+        .primaryObjectReferenceSystemIn(selectionCriteria.getSystem())
+        .primaryObjectReferenceSystemInstanceIn(selectionCriteria.getSystemInstance())
+        .primaryObjectReferenceTypeIn(selectionCriteria.getType())
+        .primaryObjectReferenceValueIn(selectionCriteria.getValue())
+        .list();
+  }
+
+  private Optional<TaskanaException> desiredCallbackStateCanBeSetForFoundSummary(
+      MinimalTaskSummary foundSummary, CallbackState desiredCallbackState) {
+
+    CallbackState currentTaskCallbackState = foundSummary.getCallbackState();
+    TaskState currentTaskState = foundSummary.getTaskState();
+
+    switch (desiredCallbackState) {
+      case CALLBACK_PROCESSING_COMPLETED:
+        if (!currentTaskState.isEndState()) {
+          return Optional.of(
+              new InvalidTaskStateException(
+                  foundSummary.getTaskId(), foundSummary.getTaskState(), TaskState.END_STATES));
+        }
+        break;
+      case CLAIMED:
+        if (!currentTaskState.equals(TaskState.CLAIMED)) {
+          return Optional.of(
+              new InvalidTaskStateException(
+                  foundSummary.getTaskId(), foundSummary.getTaskState(), TaskState.CLAIMED));
+        }
+        if (!currentTaskCallbackState.equals(CallbackState.CALLBACK_PROCESSING_REQUIRED)) {
+          return Optional.of(
+              new InvalidCallbackStateException(
+                  foundSummary.getTaskId(),
+                  currentTaskCallbackState,
+                  CallbackState.CALLBACK_PROCESSING_REQUIRED));
+        }
+        break;
+      case CALLBACK_PROCESSING_REQUIRED:
+        if (currentTaskCallbackState.equals(CallbackState.CALLBACK_PROCESSING_COMPLETED)) {
+          return Optional.of(
+              new InvalidCallbackStateException(
+                  foundSummary.getTaskId(),
+                  currentTaskCallbackState,
+                  EnumUtil.allValuesExceptFor(CallbackState.CALLBACK_PROCESSING_COMPLETED)));
+        }
+        break;
+      default:
+        return Optional.of(
+            new InvalidArgumentException(
+                String.format(
+                    "desired callbackState has to be in '%s'",
+                    Arrays.toString(
+                        new CallbackState[] {
+                          CallbackState.CALLBACK_PROCESSING_COMPLETED,
+                          CallbackState.CLAIMED,
+                          CallbackState.CALLBACK_PROCESSING_REQUIRED
+                        }))));
+    }
+    return Optional.empty();
+  }
+
+  private static Predicate<TaskSummaryImpl> addErrorToBulkLog(
+      CheckedConsumer<TaskSummaryImpl, TaskanaException> checkedConsumer,
+      BulkOperationResults<String, TaskanaException> bulkLog) {
+    return summary -> {
+      try {
+        checkedConsumer.accept(summary);
+        return true;
+      } catch (TaskanaException e) {
+        bulkLog.addError(summary.getId(), e);
+        return false;
+      }
+    };
+  }
+
+  private static void claimActionsOnTask(TaskSummaryImpl task, String userId, Instant now) {
+    task.setOwner(userId);
+    task.setModified(now);
+    task.setClaimed(now);
+    task.setRead(true);
+    task.setState(TaskState.CLAIMED);
+  }
+
+  private static void completeActionsOnTask(TaskSummaryImpl task, String userId, Instant now) {
+    task.setCompleted(now);
+    task.setModified(now);
+    task.setState(TaskState.COMPLETED);
+    task.setOwner(userId);
   }
 
   private List<TaskSummaryImpl> augmentTaskSummariesByContainedSummariesWithoutPartitioning(
@@ -1286,161 +1455,6 @@ public class TaskServiceImpl implements TaskService {
     return task;
   }
 
-  private void deleteTask(String taskId, boolean forceDelete)
-      throws TaskNotFoundException, InvalidStateException, NotAuthorizedException {
-    taskanaEngine.getEngine().checkRoleMembership(TaskanaRole.ADMIN);
-    TaskImpl task;
-    try {
-      taskanaEngine.openConnection();
-      task = (TaskImpl) getTask(taskId);
-
-      if (!(task.getState().isEndState()) && !forceDelete) {
-        throw new InvalidTaskStateException(taskId, task.getState(), TaskState.END_STATES);
-      }
-      if ((!task.getState().in(TaskState.TERMINATED, TaskState.CANCELLED))
-          && CallbackState.CALLBACK_PROCESSING_REQUIRED.equals(task.getCallbackState())) {
-        throw new InvalidCallbackStateException(
-            taskId,
-            task.getCallbackState(),
-            EnumUtil.allValuesExceptFor(CallbackState.CALLBACK_PROCESSING_REQUIRED));
-      }
-
-      attachmentMapper.deleteMultipleByTaskIds(Collections.singletonList(taskId));
-      taskMapper.delete(taskId);
-
-      if (taskanaEngine.getEngine().isHistoryEnabled()
-          && taskanaEngine.getEngine().getConfiguration().isDeleteHistoryOnTaskDeletionEnabled()) {
-        historyEventManager.deleteEvents(Collections.singletonList(taskId));
-      }
-
-      if (LOGGER.isDebugEnabled()) {
-        LOGGER.debug("Task {} deleted.", taskId);
-      }
-    } finally {
-      taskanaEngine.returnConnection();
-    }
-  }
-
-  private void removeSingleTaskForTaskDeletionById(
-      BulkOperationResults<String, TaskanaException> bulkLog,
-      List<MinimalTaskSummary> taskSummaries,
-      Iterator<String> taskIdIterator) {
-    String currentTaskId = taskIdIterator.next();
-    if (currentTaskId == null || currentTaskId.equals("")) {
-      bulkLog.addError(
-          "", new InvalidArgumentException("IDs with EMPTY or NULL value are not allowed."));
-      taskIdIterator.remove();
-    } else {
-      MinimalTaskSummary foundSummary =
-          taskSummaries.stream()
-              .filter(taskSummary -> currentTaskId.equals(taskSummary.getTaskId()))
-              .findFirst()
-              .orElse(null);
-      if (foundSummary == null) {
-        bulkLog.addError(currentTaskId, new TaskNotFoundException(currentTaskId));
-        taskIdIterator.remove();
-      } else if (!(foundSummary.getTaskState().isEndState())) {
-        bulkLog.addError(
-            currentTaskId,
-            new InvalidTaskStateException(
-                currentTaskId, foundSummary.getTaskState(), TaskState.END_STATES));
-        taskIdIterator.remove();
-      } else {
-        if ((!foundSummary.getTaskState().in(TaskState.CANCELLED, TaskState.TERMINATED))
-            && CallbackState.CALLBACK_PROCESSING_REQUIRED.equals(foundSummary.getCallbackState())) {
-          bulkLog.addError(
-              currentTaskId,
-              new InvalidCallbackStateException(
-                  currentTaskId,
-                  foundSummary.getCallbackState(),
-                  EnumUtil.allValuesExceptFor(CallbackState.CALLBACK_PROCESSING_REQUIRED)));
-          taskIdIterator.remove();
-        }
-      }
-    }
-  }
-
-  private void removeSingleTaskForCallbackStateByExternalId(
-      BulkOperationResults<String, TaskanaException> bulkLog,
-      List<MinimalTaskSummary> taskSummaries,
-      Iterator<String> externalIdIterator,
-      CallbackState desiredCallbackState) {
-    String currentExternalId = externalIdIterator.next();
-    if (currentExternalId == null || currentExternalId.equals("")) {
-      bulkLog.addError(
-          "", new InvalidArgumentException("IDs with EMPTY or NULL value are not allowed."));
-      externalIdIterator.remove();
-    } else {
-      Optional<MinimalTaskSummary> foundSummary =
-          taskSummaries.stream()
-              .filter(taskSummary -> currentExternalId.equals(taskSummary.getExternalId()))
-              .findFirst();
-      if (foundSummary.isPresent()) {
-        Optional<TaskanaException> invalidStateException =
-            desiredCallbackStateCanBeSetForFoundSummary(foundSummary.get(), desiredCallbackState);
-        if (invalidStateException.isPresent()) {
-          bulkLog.addError(currentExternalId, invalidStateException.get());
-          externalIdIterator.remove();
-        }
-      } else {
-        bulkLog.addError(currentExternalId, new TaskNotFoundException(currentExternalId));
-        externalIdIterator.remove();
-      }
-    }
-  }
-
-  private Optional<TaskanaException> desiredCallbackStateCanBeSetForFoundSummary(
-      MinimalTaskSummary foundSummary, CallbackState desiredCallbackState) {
-
-    CallbackState currentTaskCallbackState = foundSummary.getCallbackState();
-    TaskState currentTaskState = foundSummary.getTaskState();
-
-    switch (desiredCallbackState) {
-      case CALLBACK_PROCESSING_COMPLETED:
-        if (!currentTaskState.isEndState()) {
-          return Optional.of(
-              new InvalidTaskStateException(
-                  foundSummary.getTaskId(), foundSummary.getTaskState(), TaskState.END_STATES));
-        }
-        break;
-      case CLAIMED:
-        if (!currentTaskState.equals(TaskState.CLAIMED)) {
-          return Optional.of(
-              new InvalidTaskStateException(
-                  foundSummary.getTaskId(), foundSummary.getTaskState(), TaskState.CLAIMED));
-        }
-        if (!currentTaskCallbackState.equals(CallbackState.CALLBACK_PROCESSING_REQUIRED)) {
-          return Optional.of(
-              new InvalidCallbackStateException(
-                  foundSummary.getTaskId(),
-                  currentTaskCallbackState,
-                  CallbackState.CALLBACK_PROCESSING_REQUIRED));
-        }
-        break;
-      case CALLBACK_PROCESSING_REQUIRED:
-        if (currentTaskCallbackState.equals(CallbackState.CALLBACK_PROCESSING_COMPLETED)) {
-          return Optional.of(
-              new InvalidCallbackStateException(
-                  foundSummary.getTaskId(),
-                  currentTaskCallbackState,
-                  EnumUtil.allValuesExceptFor(CallbackState.CALLBACK_PROCESSING_COMPLETED)));
-        }
-        break;
-      default:
-        return Optional.of(
-            new InvalidArgumentException(
-                String.format(
-                    "desired callbackState has to be in '%s'",
-                    Arrays.toString(
-                        new CallbackState[] {
-                          CallbackState.CALLBACK_PROCESSING_COMPLETED,
-                          CallbackState.CLAIMED,
-                          CallbackState.CALLBACK_PROCESSING_REQUIRED
-                        }))));
-    }
-    return Optional.empty();
-  }
-
   private void standardSettingsOnTaskCreation(TaskImpl task, Classification classification)
       throws InvalidArgumentException, ClassificationNotFoundException,
           AttachmentPersistenceException {
@@ -1551,71 +1565,6 @@ public class TaskServiceImpl implements TaskService {
     }
   }
 
-  private Map<String, WorkbasketSummary> findWorkbasketsForTasks(
-      List<? extends TaskSummary> taskSummaries) {
-    if (taskSummaries == null || taskSummaries.isEmpty()) {
-      return Collections.emptyMap();
-    }
-
-    Set<String> workbasketIds =
-        taskSummaries.stream()
-            .map(TaskSummary::getWorkbasketSummary)
-            .map(WorkbasketSummary::getId)
-            .collect(Collectors.toSet());
-
-    return queryWorkbasketsForTasks(workbasketIds).stream()
-        .collect(Collectors.toMap(WorkbasketSummary::getId, Function.identity()));
-  }
-
-  private Map<String, ClassificationSummary> findClassificationsForTasksAndAttachments(
-      List<? extends TaskSummary> taskSummaries,
-      List<? extends AttachmentSummaryImpl> attachmentSummaries) {
-    if (taskSummaries == null || taskSummaries.isEmpty()) {
-      return Collections.emptyMap();
-    }
-
-    Set<String> classificationIds =
-        Stream.concat(
-                taskSummaries.stream().map(TaskSummary::getClassificationSummary),
-                attachmentSummaries.stream().map(AttachmentSummary::getClassificationSummary))
-            .map(ClassificationSummary::getId)
-            .collect(Collectors.toSet());
-
-    return queryClassificationsForTasksAndAttachments(classificationIds).stream()
-        .collect(Collectors.toMap(ClassificationSummary::getId, Function.identity()));
-  }
-
-  private Map<String, ClassificationSummary> findClassificationForTaskImplAndAttachments(
-      TaskImpl task, List<AttachmentImpl> attachmentImpls) {
-    return findClassificationsForTasksAndAttachments(
-        Collections.singletonList(task), attachmentImpls);
-  }
-
-  private List<ClassificationSummary> queryClassificationsForTasksAndAttachments(
-      Set<String> classificationIds) {
-
-    if (LOGGER.isDebugEnabled()) {
-      LOGGER.debug(
-          "queryClassificationsForTasksAndAttachments() about to query classifications and exit");
-    }
-    return this.classificationService
-        .createClassificationQuery()
-        .idIn(classificationIds.toArray(new String[0]))
-        .list();
-  }
-
-  private List<WorkbasketSummary> queryWorkbasketsForTasks(Set<String> workbasketIds) {
-
-    if (LOGGER.isDebugEnabled()) {
-      LOGGER.debug("queryWorkbasketsForTasks() about to query workbaskets and exit");
-    }
-    // perform classification query
-    return this.workbasketService
-        .createWorkbasketQuery()
-        .idIn(workbasketIds.toArray(new String[0]))
-        .list();
-  }
-
   private void addClassificationSummariesToTaskSummaries(
       List<TaskSummaryImpl> tasks, Map<String, ClassificationSummary> classificationSummaryById) {
 
@@ -1720,29 +1669,6 @@ public class TaskServiceImpl implements TaskService {
     return newTask;
   }
 
-  private void validateCustomFields(Map<TaskCustomField, String> customFieldsToUpdate)
-      throws InvalidArgumentException {
-
-    if (customFieldsToUpdate == null || customFieldsToUpdate.isEmpty()) {
-      throw new InvalidArgumentException(
-          "The customFieldsToUpdate argument to updateTasks must not be empty.");
-    }
-  }
-
-  private List<TaskSummary> getTasksToChange(List<String> taskIds) {
-    return createTaskQuery().idIn(taskIds.toArray(new String[0])).list();
-  }
-
-  private List<TaskSummary> getTasksToChange(ObjectReference selectionCriteria) {
-    return createTaskQuery()
-        .primaryObjectReferenceCompanyIn(selectionCriteria.getCompany())
-        .primaryObjectReferenceSystemIn(selectionCriteria.getSystem())
-        .primaryObjectReferenceSystemInstanceIn(selectionCriteria.getSystemInstance())
-        .primaryObjectReferenceTypeIn(selectionCriteria.getType())
-        .primaryObjectReferenceValueIn(selectionCriteria.getValue())
-        .list();
-  }
-
   private void standardUpdateActions(TaskImpl oldTaskImpl, TaskImpl newTaskImpl)
       throws InvalidArgumentException, InvalidStateException, ClassificationNotFoundException {
 
@@ -1798,13 +1724,106 @@ public class TaskServiceImpl implements TaskService {
     }
   }
 
-  private void createTasksCompletedEvents(List<? extends TaskSummary> taskSummaries) {
-    taskSummaries.forEach(
-        task ->
-            historyEventManager.createEvent(
-                new TaskCompletedEvent(
-                    IdGenerator.generateWithPrefix(IdGenerator.ID_PREFIX_TASK_HISTORY_EVENT),
-                    task,
-                    taskanaEngine.getEngine().getCurrentUserContext().getUserid())));
+  private void deleteTask(String taskId, boolean forceDelete)
+      throws TaskNotFoundException, InvalidStateException, NotAuthorizedException {
+    taskanaEngine.getEngine().checkRoleMembership(TaskanaRole.ADMIN);
+    TaskImpl task;
+    try {
+      taskanaEngine.openConnection();
+      task = (TaskImpl) getTask(taskId);
+
+      if (!(task.getState().isEndState()) && !forceDelete) {
+        throw new InvalidTaskStateException(taskId, task.getState(), TaskState.END_STATES);
+      }
+      if ((!task.getState().in(TaskState.TERMINATED, TaskState.CANCELLED))
+          && CallbackState.CALLBACK_PROCESSING_REQUIRED.equals(task.getCallbackState())) {
+        throw new InvalidCallbackStateException(
+            taskId,
+            task.getCallbackState(),
+            EnumUtil.allValuesExceptFor(CallbackState.CALLBACK_PROCESSING_REQUIRED));
+      }
+
+      attachmentMapper.deleteMultipleByTaskIds(Collections.singletonList(taskId));
+      taskMapper.delete(taskId);
+
+      if (taskanaEngine.getEngine().isHistoryEnabled()
+          && taskanaEngine.getEngine().getConfiguration().isDeleteHistoryOnTaskDeletionEnabled()) {
+        historyEventManager.deleteEvents(Collections.singletonList(taskId));
+      }
+
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.debug("Task {} deleted.", taskId);
+      }
+    } finally {
+      taskanaEngine.returnConnection();
+    }
+  }
+
+  private void removeSingleTaskForTaskDeletionById(
+      BulkOperationResults<String, TaskanaException> bulkLog,
+      List<MinimalTaskSummary> taskSummaries,
+      Iterator<String> taskIdIterator) {
+    String currentTaskId = taskIdIterator.next();
+    if (currentTaskId == null || currentTaskId.equals("")) {
+      bulkLog.addError(
+          "", new InvalidArgumentException("IDs with EMPTY or NULL value are not allowed."));
+      taskIdIterator.remove();
+    } else {
+      MinimalTaskSummary foundSummary =
+          taskSummaries.stream()
+              .filter(taskSummary -> currentTaskId.equals(taskSummary.getTaskId()))
+              .findFirst()
+              .orElse(null);
+      if (foundSummary == null) {
+        bulkLog.addError(currentTaskId, new TaskNotFoundException(currentTaskId));
+        taskIdIterator.remove();
+      } else if (!(foundSummary.getTaskState().isEndState())) {
+        bulkLog.addError(
+            currentTaskId,
+            new InvalidTaskStateException(
+                currentTaskId, foundSummary.getTaskState(), TaskState.END_STATES));
+        taskIdIterator.remove();
+      } else {
+        if ((!foundSummary.getTaskState().in(TaskState.CANCELLED, TaskState.TERMINATED))
+            && CallbackState.CALLBACK_PROCESSING_REQUIRED.equals(foundSummary.getCallbackState())) {
+          bulkLog.addError(
+              currentTaskId,
+              new InvalidCallbackStateException(
+                  currentTaskId,
+                  foundSummary.getCallbackState(),
+                  EnumUtil.allValuesExceptFor(CallbackState.CALLBACK_PROCESSING_REQUIRED)));
+          taskIdIterator.remove();
+        }
+      }
+    }
+  }
+
+  private void removeSingleTaskForCallbackStateByExternalId(
+      BulkOperationResults<String, TaskanaException> bulkLog,
+      List<MinimalTaskSummary> taskSummaries,
+      Iterator<String> externalIdIterator,
+      CallbackState desiredCallbackState) {
+    String currentExternalId = externalIdIterator.next();
+    if (currentExternalId == null || currentExternalId.equals("")) {
+      bulkLog.addError(
+          "", new InvalidArgumentException("IDs with EMPTY or NULL value are not allowed."));
+      externalIdIterator.remove();
+    } else {
+      Optional<MinimalTaskSummary> foundSummary =
+          taskSummaries.stream()
+              .filter(taskSummary -> currentExternalId.equals(taskSummary.getExternalId()))
+              .findFirst();
+      if (foundSummary.isPresent()) {
+        Optional<TaskanaException> invalidStateException =
+            desiredCallbackStateCanBeSetForFoundSummary(foundSummary.get(), desiredCallbackState);
+        if (invalidStateException.isPresent()) {
+          bulkLog.addError(currentExternalId, invalidStateException.get());
+          externalIdIterator.remove();
+        }
+      } else {
+        bulkLog.addError(currentExternalId, new TaskNotFoundException(currentExternalId));
+        externalIdIterator.remove();
+      }
+    }
   }
 }

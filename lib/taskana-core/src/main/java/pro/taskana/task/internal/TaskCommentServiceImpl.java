@@ -48,48 +48,6 @@ class TaskCommentServiceImpl {
     return taskComment;
   }
 
-  TaskComment updateTaskComment(TaskComment taskCommentToUpdate)
-      throws NotAuthorizedException, ConcurrencyException, TaskCommentNotFoundException,
-          TaskNotFoundException, InvalidArgumentException {
-
-    String userId = taskanaEngine.getEngine().getCurrentUserContext().getUserid();
-
-    TaskCommentImpl taskCommentImplToUpdate = (TaskCommentImpl) taskCommentToUpdate;
-
-    try {
-
-      taskanaEngine.openConnection();
-
-      TaskComment originalTaskComment = getTaskComment(taskCommentImplToUpdate.getId());
-
-      if (originalTaskComment.getCreator().equals(userId)
-              && taskCommentImplToUpdate.getCreator().equals(originalTaskComment.getCreator())
-          || taskanaEngine.getEngine().isUserInRole(TaskanaRole.ADMIN)
-          || taskanaEngine.getEngine().isUserInRole(TaskanaRole.TASK_ADMIN)) {
-
-        checkModifiedHasNotChanged(originalTaskComment, taskCommentImplToUpdate);
-
-        taskCommentImplToUpdate.setModified(Instant.now());
-
-        taskCommentMapper.update(taskCommentImplToUpdate);
-
-        if (LOGGER.isDebugEnabled()) {
-          LOGGER.debug(
-              "Method updateTaskComment() updated taskComment '{}' for user '{}'.",
-              taskCommentImplToUpdate.getId(),
-              userId);
-        }
-
-      } else {
-        throw new MismatchedTaskCommentCreatorException(userId, taskCommentImplToUpdate.getId());
-      }
-    } finally {
-      taskanaEngine.returnConnection();
-    }
-
-    return taskCommentImplToUpdate;
-  }
-
   TaskComment createTaskComment(TaskComment taskCommentToCreate)
       throws NotAuthorizedException, TaskNotFoundException, InvalidArgumentException {
 
@@ -112,37 +70,6 @@ class TaskCommentServiceImpl {
     }
 
     return taskCommentImplToCreate;
-  }
-
-  void deleteTaskComment(String taskCommentId)
-      throws NotAuthorizedException, TaskCommentNotFoundException, TaskNotFoundException,
-          InvalidArgumentException {
-
-    String userId = taskanaEngine.getEngine().getCurrentUserContext().getUserid();
-
-    try {
-
-      taskanaEngine.openConnection();
-
-      TaskComment taskCommentToDelete = getTaskComment(taskCommentId);
-
-      if (taskCommentToDelete.getCreator().equals(userId)
-          || taskanaEngine.getEngine().isUserInRole(TaskanaRole.ADMIN)
-          || taskanaEngine.getEngine().isUserInRole(TaskanaRole.TASK_ADMIN)) {
-
-        taskCommentMapper.delete(taskCommentId);
-
-        if (LOGGER.isDebugEnabled()) {
-          LOGGER.debug("taskComment {} deleted", taskCommentToDelete.getId());
-        }
-
-      } else {
-        throw new MismatchedTaskCommentCreatorException(userId, taskCommentToDelete.getId());
-      }
-
-    } finally {
-      taskanaEngine.returnConnection();
-    }
   }
 
   List<TaskComment> getTaskComments(String taskId)
@@ -201,11 +128,76 @@ class TaskCommentServiceImpl {
     }
   }
 
-  private void checkModifiedHasNotChanged(
-      TaskComment oldTaskComment, TaskComment taskCommentImplToUpdate) throws ConcurrencyException {
+  TaskComment updateTaskComment(TaskComment taskCommentToUpdate)
+      throws NotAuthorizedException, ConcurrencyException, TaskCommentNotFoundException,
+          TaskNotFoundException, InvalidArgumentException {
 
-    if (!oldTaskComment.getModified().equals(taskCommentImplToUpdate.getModified())) {
-      throw new ConcurrencyException(taskCommentImplToUpdate.getId());
+    String userId = taskanaEngine.getEngine().getCurrentUserContext().getUserid();
+
+    TaskCommentImpl taskCommentImplToUpdate = (TaskCommentImpl) taskCommentToUpdate;
+
+    try {
+
+      taskanaEngine.openConnection();
+
+      TaskComment originalTaskComment = getTaskComment(taskCommentImplToUpdate.getId());
+
+      if (originalTaskComment.getCreator().equals(userId)
+              && taskCommentImplToUpdate.getCreator().equals(originalTaskComment.getCreator())
+          || taskanaEngine.getEngine().isUserInRole(TaskanaRole.ADMIN)
+          || taskanaEngine.getEngine().isUserInRole(TaskanaRole.TASK_ADMIN)) {
+
+        checkModifiedHasNotChanged(originalTaskComment, taskCommentImplToUpdate);
+
+        taskCommentImplToUpdate.setModified(Instant.now());
+
+        taskCommentMapper.update(taskCommentImplToUpdate);
+
+        if (LOGGER.isDebugEnabled()) {
+          LOGGER.debug(
+              "Method updateTaskComment() updated taskComment '{}' for user '{}'.",
+              taskCommentImplToUpdate.getId(),
+              userId);
+        }
+
+      } else {
+        throw new MismatchedTaskCommentCreatorException(userId, taskCommentImplToUpdate.getId());
+      }
+    } finally {
+      taskanaEngine.returnConnection();
+    }
+
+    return taskCommentImplToUpdate;
+  }
+
+  void deleteTaskComment(String taskCommentId)
+      throws NotAuthorizedException, TaskCommentNotFoundException, TaskNotFoundException,
+          InvalidArgumentException {
+
+    String userId = taskanaEngine.getEngine().getCurrentUserContext().getUserid();
+
+    try {
+
+      taskanaEngine.openConnection();
+
+      TaskComment taskCommentToDelete = getTaskComment(taskCommentId);
+
+      if (taskCommentToDelete.getCreator().equals(userId)
+          || taskanaEngine.getEngine().isUserInRole(TaskanaRole.ADMIN)
+          || taskanaEngine.getEngine().isUserInRole(TaskanaRole.TASK_ADMIN)) {
+
+        taskCommentMapper.delete(taskCommentId);
+
+        if (LOGGER.isDebugEnabled()) {
+          LOGGER.debug("taskComment {} deleted", taskCommentToDelete.getId());
+        }
+
+      } else {
+        throw new MismatchedTaskCommentCreatorException(userId, taskCommentToDelete.getId());
+      }
+
+    } finally {
+      taskanaEngine.returnConnection();
     }
   }
 
@@ -225,6 +217,14 @@ class TaskCommentServiceImpl {
               + " NULL while creating a TaskComment.");
     }
     taskCommentImplToCreate.setCreator(creator);
+  }
+
+  private void checkModifiedHasNotChanged(
+      TaskComment oldTaskComment, TaskComment taskCommentImplToUpdate) throws ConcurrencyException {
+
+    if (!oldTaskComment.getModified().equals(taskCommentImplToUpdate.getModified())) {
+      throw new ConcurrencyException(taskCommentImplToUpdate.getId());
+    }
   }
 
   private void validateNoneExistingTaskCommentId(String taskCommentId)

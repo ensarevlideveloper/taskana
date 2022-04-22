@@ -97,6 +97,22 @@ final class TaskTransferrer {
     return transferMultipleTasks(taskIds, destinationWorkbasket, setTransferFlag);
   }
 
+  private void createTransferredEvent(
+      TaskSummary oldTask,
+      TaskSummary newTask,
+      String originWorkbasketId,
+      String destinationWorkbasketId) {
+    String details = ObjectAttributeChangeDetector.determineChangesInAttributes(oldTask, newTask);
+    historyEventManager.createEvent(
+        new TaskTransferredEvent(
+            IdGenerator.generateWithPrefix(IdGenerator.ID_PREFIX_TASK_HISTORY_EVENT),
+            newTask,
+            originWorkbasketId,
+            destinationWorkbasketId,
+            taskanaEngine.getEngine().getCurrentUserContext().getUserid(),
+            details));
+  }
+
   private Task transferSingleTask(
       String taskId, WorkbasketSummary destinationWorkbasket, boolean setTransferFlag)
       throws NotAuthorizedException, TaskNotFoundException, WorkbasketNotFoundException,
@@ -174,31 +190,6 @@ final class TaskTransferrer {
     }
   }
 
-  private List<TaskSummary> filterOutTasksWhichDoNotMatchTransferCriteria(
-      List<String> taskIds,
-      List<TaskSummary> taskSummaries,
-      BulkOperationResults<String, TaskanaException> bulkLog) {
-
-    Map<String, TaskSummary> taskIdToTaskSummary =
-        taskSummaries.stream().collect(Collectors.toMap(TaskSummary::getId, Function.identity()));
-
-    Set<String> workbasketIds = getSourceWorkbasketIdsWithTransferPermission(taskSummaries);
-
-    List<TaskSummary> filteredOutTasks = new ArrayList<>(taskIds.size());
-
-    for (String taskId : new HashSet<>(taskIds)) {
-      TaskSummary taskSummary = taskIdToTaskSummary.get(taskId);
-      Optional<TaskanaException> error =
-          checkTaskForTransferCriteria(workbasketIds, taskId, taskSummary);
-      if (error.isPresent()) {
-        bulkLog.addError(taskId, error.get());
-      } else {
-        filteredOutTasks.add(taskSummary);
-      }
-    }
-    return filteredOutTasks;
-  }
-
   private Optional<TaskanaException> checkTaskForTransferCriteria(
       Set<String> sourceWorkbasketIds, String taskId, TaskSummary taskSummary) {
     TaskanaException error = null;
@@ -240,6 +231,31 @@ final class TaskTransferrer {
     return sourceWorkbaskets.stream().map(WorkbasketSummary::getId).collect(Collectors.toSet());
   }
 
+  private List<TaskSummary> filterOutTasksWhichDoNotMatchTransferCriteria(
+      List<String> taskIds,
+      List<TaskSummary> taskSummaries,
+      BulkOperationResults<String, TaskanaException> bulkLog) {
+
+    Map<String, TaskSummary> taskIdToTaskSummary =
+        taskSummaries.stream().collect(Collectors.toMap(TaskSummary::getId, Function.identity()));
+
+    Set<String> workbasketIds = getSourceWorkbasketIdsWithTransferPermission(taskSummaries);
+
+    List<TaskSummary> filteredOutTasks = new ArrayList<>(taskIds.size());
+
+    for (String taskId : new HashSet<>(taskIds)) {
+      TaskSummary taskSummary = taskIdToTaskSummary.get(taskId);
+      Optional<TaskanaException> error =
+          checkTaskForTransferCriteria(workbasketIds, taskId, taskSummary);
+      if (error.isPresent()) {
+        bulkLog.addError(taskId, error.get());
+      } else {
+        filteredOutTasks.add(taskSummary);
+      }
+    }
+    return filteredOutTasks;
+  }
+
   private void updateTransferableTasks(
       List<TaskSummary> taskSummaries,
       WorkbasketSummary destinationWorkbasket,
@@ -277,21 +293,5 @@ final class TaskTransferrer {
     task.setWorkbasketSummary(workbasket);
     task.setDomain(workbasket.getDomain());
     task.setModified(Instant.now());
-  }
-
-  private void createTransferredEvent(
-      TaskSummary oldTask,
-      TaskSummary newTask,
-      String originWorkbasketId,
-      String destinationWorkbasketId) {
-    String details = ObjectAttributeChangeDetector.determineChangesInAttributes(oldTask, newTask);
-    historyEventManager.createEvent(
-        new TaskTransferredEvent(
-            IdGenerator.generateWithPrefix(IdGenerator.ID_PREFIX_TASK_HISTORY_EVENT),
-            newTask,
-            originWorkbasketId,
-            destinationWorkbasketId,
-            taskanaEngine.getEngine().getCurrentUserContext().getUserid(),
-            details));
   }
 }

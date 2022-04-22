@@ -17,14 +17,6 @@ public interface TaskCommentMapper {
           + " #{taskComment.creator}, #{taskComment.created}, #{taskComment.modified})")
   void insert(@Param("taskComment") TaskCommentImpl taskComment);
 
-  @Update(
-      "UPDATE TASK_COMMENT SET MODIFIED = #{modified}, TEXT_FIELD = #{textField}  "
-          + "WHERE ID = #{id}")
-  void update(TaskCommentImpl taskCommentImpl);
-
-  @Delete("DELETE FROM TASK_COMMENT WHERE ID = #{taskCommentId}")
-  void delete(String taskCommentId);
-
   @Select(
       "<script> SELECT ID, TASK_ID, TEXT_FIELD, CREATOR, CREATED, MODIFIED"
           + " FROM TASK_COMMENT "
@@ -38,4 +30,12 @@ public interface TaskCommentMapper {
   @Result(property = "created", column = "CREATED")
   @Result(property = "modified", column = "MODIFIED")
   TaskCommentImpl findById(@Param("taskCommentId") String taskCommentId);
+
+  @Update(
+      "UPDATE TASK_COMMENT SET MODIFIED = #{modified}, TEXT_FIELD = #{textField}  "
+          + "WHERE ID = #{id}")
+  void update(TaskCommentImpl taskCommentImpl);
+
+  @Delete("DELETE FROM TASK_COMMENT WHERE ID = #{taskCommentId}")
+  void delete(String taskCommentId);
 }

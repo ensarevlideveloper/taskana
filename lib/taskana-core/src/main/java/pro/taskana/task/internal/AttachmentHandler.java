@@ -35,23 +35,6 @@ public class AttachmentHandler {
     this.classificationService = classificationService;
   }
 
-  void insertAndDeleteAttachmentsOnTaskUpdate(TaskImpl newTaskImpl, TaskImpl oldTaskImpl)
-      throws AttachmentPersistenceException, InvalidArgumentException,
-          ClassificationNotFoundException {
-    List<Attachment> newAttachments =
-        newTaskImpl.getAttachments().stream().filter(Objects::nonNull).collect(Collectors.toList());
-    newTaskImpl.setAttachments(newAttachments);
-
-    for (Attachment attachment : newAttachments) {
-      verifyAttachment((AttachmentImpl) attachment, newTaskImpl.getDomain());
-      initAttachment((AttachmentImpl) attachment, newTaskImpl);
-    }
-
-    deleteRemovedAttachmentsOnTaskUpdate(newTaskImpl, oldTaskImpl);
-    insertNewAttachmentsOnTaskUpdate(newTaskImpl, oldTaskImpl);
-    updateModifiedAttachmentsOnTaskUpdate(newTaskImpl, oldTaskImpl);
-  }
-
   void insertNewAttachmentsOnTaskCreation(TaskImpl task)
       throws InvalidArgumentException, AttachmentPersistenceException,
           ClassificationNotFoundException {
@@ -78,6 +61,23 @@ public class AttachmentHandler {
     }
   }
 
+  void insertAndDeleteAttachmentsOnTaskUpdate(TaskImpl newTaskImpl, TaskImpl oldTaskImpl)
+      throws AttachmentPersistenceException, InvalidArgumentException,
+          ClassificationNotFoundException {
+    List<Attachment> newAttachments =
+        newTaskImpl.getAttachments().stream().filter(Objects::nonNull).collect(Collectors.toList());
+    newTaskImpl.setAttachments(newAttachments);
+
+    for (Attachment attachment : newAttachments) {
+      verifyAttachment((AttachmentImpl) attachment, newTaskImpl.getDomain());
+      initAttachment((AttachmentImpl) attachment, newTaskImpl);
+    }
+
+    deleteRemovedAttachmentsOnTaskUpdate(newTaskImpl, oldTaskImpl);
+    insertNewAttachmentsOnTaskUpdate(newTaskImpl, oldTaskImpl);
+    updateModifiedAttachmentsOnTaskUpdate(newTaskImpl, oldTaskImpl);
+  }
+
   private void insertNewAttachmentsOnTaskUpdate(TaskImpl newTaskImpl, TaskImpl oldTaskImpl)
       throws AttachmentPersistenceException {
     Set<String> oldAttachmentIds =
@@ -92,6 +92,23 @@ public class AttachmentHandler {
 
     for (Attachment attachment : newAttachments) {
       insertNewAttachmentOnTaskUpdate(newTaskImpl, attachment);
+    }
+  }
+
+  private void insertNewAttachmentOnTaskUpdate(TaskImpl newTaskImpl, Attachment attachment)
+      throws AttachmentPersistenceException {
+    AttachmentImpl attachmentImpl = (AttachmentImpl) attachment;
+
+    try {
+      attachmentMapper.insert(attachmentImpl);
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.debug(
+            "TaskService.updateTask() for TaskId={} INSERTED an Attachment={}.",
+            newTaskImpl.getId(),
+            attachmentImpl);
+      }
+    } catch (PersistenceException e) {
+      throw new AttachmentPersistenceException(attachmentImpl.getId(), newTaskImpl.getId(), e);
     }
   }
 
@@ -112,49 +129,6 @@ public class AttachmentHandler {
               attachmentMapper.update((AttachmentImpl) a);
             }
           });
-    }
-  }
-
-  private void deleteRemovedAttachmentsOnTaskUpdate(TaskImpl newTaskImpl, TaskImpl oldTaskImpl) {
-
-    final List<Attachment> newAttachments = newTaskImpl.getAttachments();
-    List<String> newAttachmentIds = new ArrayList<>();
-    if (newAttachments != null && !newAttachments.isEmpty()) {
-      newAttachmentIds =
-          newAttachments.stream().map(Attachment::getId).collect(Collectors.toList());
-    }
-    List<Attachment> oldAttachments = oldTaskImpl.getAttachments();
-    if (oldAttachments != null && !oldAttachments.isEmpty()) {
-      final List<String> newAttIds = newAttachmentIds;
-      oldAttachments.forEach(
-          a -> {
-            if (!newAttIds.contains(a.getId())) {
-              attachmentMapper.delete(a.getId());
-              if (LOGGER.isDebugEnabled()) {
-                LOGGER.debug(
-                    "TaskService.updateTask() for TaskId={} DELETED an Attachment={}.",
-                    newTaskImpl.getId(),
-                    a);
-              }
-            }
-          });
-    }
-  }
-
-  private void insertNewAttachmentOnTaskUpdate(TaskImpl newTaskImpl, Attachment attachment)
-      throws AttachmentPersistenceException {
-    AttachmentImpl attachmentImpl = (AttachmentImpl) attachment;
-
-    try {
-      attachmentMapper.insert(attachmentImpl);
-      if (LOGGER.isDebugEnabled()) {
-        LOGGER.debug(
-            "TaskService.updateTask() for TaskId={} INSERTED an Attachment={}.",
-            newTaskImpl.getId(),
-            attachmentImpl);
-      }
-    } catch (PersistenceException e) {
-      throw new AttachmentPersistenceException(attachmentImpl.getId(), newTaskImpl.getId(), e);
     }
   }
 
@@ -190,5 +164,31 @@ public class AttachmentHandler {
             .getClassification(attachment.getClassificationSummary().getKey(), domain)
             .asSummary();
     attachment.setClassificationSummary(classification);
+  }
+
+  private void deleteRemovedAttachmentsOnTaskUpdate(TaskImpl newTaskImpl, TaskImpl oldTaskImpl) {
+
+    final List<Attachment> newAttachments = newTaskImpl.getAttachments();
+    List<String> newAttachmentIds = new ArrayList<>();
+    if (newAttachments != null && !newAttachments.isEmpty()) {
+      newAttachmentIds =
+          newAttachments.stream().map(Attachment::getId).collect(Collectors.toList());
+    }
+    List<Attachment> oldAttachments = oldTaskImpl.getAttachments();
+    if (oldAttachments != null && !oldAttachments.isEmpty()) {
+      final List<String> newAttIds = newAttachmentIds;
+      oldAttachments.forEach(
+          a -> {
+            if (!newAttIds.contains(a.getId())) {
+              attachmentMapper.delete(a.getId());
+              if (LOGGER.isDebugEnabled()) {
+                LOGGER.debug(
+                    "TaskService.updateTask() for TaskId={} DELETED an Attachment={}.",
+                    newTaskImpl.getId(),
+                    a);
+              }
+            }
+          });
+    }
   }
 }
