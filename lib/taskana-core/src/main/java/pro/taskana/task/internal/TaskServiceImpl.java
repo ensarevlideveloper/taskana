@@ -165,9 +165,12 @@ public class TaskServiceImpl implements TaskService {
 
   @Override
   public Task forceClaim(String taskId)
-      throws TaskNotFoundException, InvalidStateException, InvalidOwnerException,
-          NotAuthorizedException {
-    return claim(taskId, true);
+      throws TaskNotFoundException, InvalidStateException, InvalidOwnerException {
+    try {
+      return claim(taskId, true);
+    } catch (NotAuthorizedException e) {
+      throw new SystemException("This should not happen and represents a bug.", e);
+    }
   }
 
   @Override
@@ -179,9 +182,12 @@ public class TaskServiceImpl implements TaskService {
 
   @Override
   public Task forceCancelClaim(String taskId)
-      throws TaskNotFoundException, InvalidStateException, InvalidOwnerException,
-          NotAuthorizedException {
-    return this.cancelClaim(taskId, true);
+      throws TaskNotFoundException, InvalidStateException, InvalidOwnerException {
+    try {
+      return this.cancelClaim(taskId, true);
+    } catch (NotAuthorizedException e) {
+      throw new SystemException("This should not happen and represents a bug.", e);
+    }
   }
 
   @Override
@@ -193,9 +199,12 @@ public class TaskServiceImpl implements TaskService {
 
   @Override
   public Task forceRequestReview(String taskId)
-      throws InvalidTaskStateException, TaskNotFoundException, NotAuthorizedException,
-          InvalidOwnerException {
-    return requestReview(taskId, true);
+      throws InvalidTaskStateException, TaskNotFoundException, InvalidOwnerException {
+    try {
+      return requestReview(taskId, true);
+    } catch (NotAuthorizedException e) {
+      throw new SystemException("This should not happen and represents a bug.", e);
+    }
   }
 
   @Override
@@ -207,9 +216,12 @@ public class TaskServiceImpl implements TaskService {
 
   @Override
   public Task forceRequestChanges(String taskId)
-      throws InvalidTaskStateException, TaskNotFoundException, NotAuthorizedException,
-          InvalidOwnerException {
-    return requestChanges(taskId, true);
+      throws InvalidTaskStateException, TaskNotFoundException, InvalidOwnerException {
+    try {
+      return requestChanges(taskId, true);
+    } catch (NotAuthorizedException e) {
+      throw new SystemException("This should not happen and represents a bug.", e);
+    }
   }
 
   @Override
@@ -221,9 +233,12 @@ public class TaskServiceImpl implements TaskService {
 
   @Override
   public Task forceCompleteTask(String taskId)
-      throws TaskNotFoundException, InvalidOwnerException, InvalidStateException,
-          NotAuthorizedException {
-    return completeTask(taskId, true);
+      throws TaskNotFoundException, InvalidOwnerException, InvalidStateException {
+    try {
+      return completeTask(taskId, true);
+    } catch (NotAuthorizedException e) {
+      throw new SystemException("This should not happen and represents a bug.", e);
+    }
   }
 
   @Override
@@ -569,9 +584,12 @@ public class TaskServiceImpl implements TaskService {
   }
 
   @Override
-  public void forceDeleteTask(String taskId)
-      throws TaskNotFoundException, InvalidStateException, NotAuthorizedException {
-    deleteTask(taskId, true);
+  public void forceDeleteTask(String taskId) throws TaskNotFoundException, InvalidStateException {
+    try {
+      deleteTask(taskId, true);
+    } catch (NotAuthorizedException e) {
+      throw new SystemException("This should not happen and represents a bug.", e);
+    }
   }
 
   @Override

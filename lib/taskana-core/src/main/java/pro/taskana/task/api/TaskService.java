@@ -172,12 +172,9 @@ public interface TaskService {
    * @throws InvalidStateException if the state of Task with taskId is in {@linkplain
    *     TaskState#END_STATES}
    * @throws InvalidOwnerException cannot be thrown
-   * @throws NotAuthorizedException if the current user has no {@linkplain
-   *     WorkbasketPermission#READ} for the {@linkplain Workbasket} the {@linkplain Task} is in
    */
   Task forceClaim(String taskId)
-      throws TaskNotFoundException, InvalidStateException, InvalidOwnerException,
-          NotAuthorizedException;
+      throws TaskNotFoundException, InvalidStateException, InvalidOwnerException;
 
   /**
    * Selects and claims the first {@linkplain Task} which is returned by the {@linkplain TaskQuery}.
@@ -217,12 +214,9 @@ public interface TaskService {
    * @throws InvalidStateException if the {@linkplain Task} is already in one of the {@linkplain
    *     TaskState#END_STATES}
    * @throws InvalidOwnerException cannot be thrown
-   * @throws NotAuthorizedException if the current user has no {@linkplain
-   *     WorkbasketPermission#READ} for the {@linkplain Workbasket} the {@linkplain Task} is in
    */
   Task forceCancelClaim(String taskId)
-      throws TaskNotFoundException, InvalidStateException, InvalidOwnerException,
-          NotAuthorizedException;
+      throws TaskNotFoundException, InvalidStateException, InvalidOwnerException;
 
   /**
    * Request review for an existing {@linkplain Task} that is in {@linkplain TaskState#CLAIMED}.
@@ -250,12 +244,9 @@ public interface TaskService {
    *     Task} with taskId is one of the {@linkplain TaskState#END_STATES}
    * @throws TaskNotFoundException if the {@linkplain Task} with taskId wasn't found
    * @throws InvalidOwnerException cannot be thrown
-   * @throws NotAuthorizedException if the current user has no {@linkplain
-   *     WorkbasketPermission#READ} for the {@linkplain Workbasket} the {@linkplain Task} is in
    */
   Task forceRequestReview(String taskId)
-      throws InvalidTaskStateException, TaskNotFoundException, NotAuthorizedException,
-          InvalidOwnerException;
+      throws InvalidTaskStateException, TaskNotFoundException, InvalidOwnerException;
 
   /**
    * Request changes for an existing {@linkplain Task} that is in {@linkplain TaskState#IN_REVIEW}.
@@ -287,12 +278,9 @@ public interface TaskService {
    *     Task} with taskId is one of the {@linkplain TaskState#END_STATES}
    * @throws TaskNotFoundException if the {@linkplain Task} with taskId wasn't found
    * @throws InvalidOwnerException cannot be thrown
-   * @throws NotAuthorizedException if the current user has no {@linkplain
-   *     WorkbasketPermission#READ} for the {@linkplain Workbasket} the {@linkplain Task} is in
    */
   Task forceRequestChanges(String taskId)
-      throws InvalidTaskStateException, TaskNotFoundException, NotAuthorizedException,
-          InvalidOwnerException;
+      throws InvalidTaskStateException, TaskNotFoundException, InvalidOwnerException;
 
   /**
    * Complete a claimed {@linkplain Task} as {@linkplain Task#getOwner() owner} or {@linkplain
@@ -331,12 +319,9 @@ public interface TaskService {
    * @throws TaskNotFoundException if the {@linkplain Task} with taskId wasn't found
    * @throws InvalidOwnerException if current user isn't the {@linkplain Task#getOwner() owner} of
    *     the {@linkplain Task} or {@linkplain TaskanaRole#ADMIN}
-   * @throws NotAuthorizedException if the current user has no {@linkplain
-   *     WorkbasketPermission#READ} for the {@linkplain Workbasket} the {@linkplain Task} is in
    */
   Task forceCompleteTask(String taskId)
-      throws TaskNotFoundException, InvalidOwnerException, InvalidStateException,
-          NotAuthorizedException;
+      throws TaskNotFoundException, InvalidOwnerException, InvalidStateException;
 
   /**
    * Completes a List of {@linkplain Task Tasks}.
@@ -714,11 +699,8 @@ public interface TaskService {
    *     {@linkplain Task} isn't {@linkplain TaskState#TERMINATED} or {@linkplain
    *     TaskState#CANCELLED} and the Callback State of the Task is {@linkplain
    *     CallbackState#CALLBACK_PROCESSING_REQUIRED}
-   * @throws NotAuthorizedException if the current user isn't member of {@linkplain
-   *     TaskanaRole#ADMIN}
    */
-  void forceDeleteTask(String taskId)
-      throws TaskNotFoundException, InvalidStateException, NotAuthorizedException;
+  void forceDeleteTask(String taskId) throws TaskNotFoundException, InvalidStateException;
 
   /**
    * Deletes a List of {@linkplain Task Tasks}.
